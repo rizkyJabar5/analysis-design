@@ -1,0 +1,60 @@
+@startuml
+!theme plain
+title Secure Architecture Design: Automated Analysis System
+
+skinparam componentStyle uml2
+
+actor "CI/CD Pipeline\n(GitHub Actions/Jenkins)" as CI
+
+node "Secure Cloud Environment (VPC)" {
+    
+    component "API Gateway / WAF" as Gateway <<SecurityBoundary>>
+    
+    node "Application Server" {
+        package "Spring Boot Backend" as Backend {
+            component "Security Filter Chain\n(JWT Validator)" as Auth
+            component "REST Controller" as API
+            component "AI Orchestrator Service" as Orchestrator
+            component "Data Sanitization" as Sanitizer
+            
+            Auth --> API : Validated & Authorized
+            API --> Sanitizer : Raw Input (XML/Image)
+            Sanitizer --> Orchestrator : Clean Data
+        }
+    }
+    
+    package "PostgreSQL DB\n<<Encrypted at Rest>>" as DB {
+        artifact "Analysis Reports"
+        artifact "Audit Logs"
+    }
+}
+
+package "External Services" {
+    component "LLM Provider\n(Gemini / OpenAI API)" as ExternalAI
+}
+
+' Define Connections
+CI --> Gateway : POST /api/v1/analyze\n[HTTPS / TLS 1.3]
+Gateway --> Auth : Forward Request
+Orchestrator --> DB : Save Results\n[Internal TLS]
+Orchestrator --> ExternalAI : Request Prompt\n[HTTPS + Secure API Key]
+
+' Security Notes
+note top of Gateway
+  Blocks DDoS, SQLi, and 
+  malicious payloads before 
+  they hit the backend.
+end note
+
+note right of Auth
+  Enforces zero-trust.
+  Validates Bearer Token 
+  and checks CI/CD permissions.
+end note
+
+note left of Sanitizer
+  Ensures uploaded XML 
+  doesn't contain XXE 
+  (XML External Entity) attacks.
+end note
+@enduml

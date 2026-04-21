@@ -1,0 +1,60 @@
+@startuml Unsecure-Design
+!theme plain
+title Domain Model: Threat Analysis & Severity Concept
+
+' Define Enums for structured data
+enum Severity {
+    CRITICAL
+    HIGH
+    MEDIUM
+    LOW
+    INFO
+}
+
+enum StrideCategory {
+    SPOOFING
+    TAMPERING
+    REPUDIATION
+    INFO_DISCLOSURE
+    DENIAL_OF_SERVICE
+    ELEVATION_OF_PRIVILEGE
+}
+
+' Define Core Entities
+class AnalysisReport {
+    - id: UUID
+    - projectId: String
+    - status: String
+    - createdAt: LocalDateTime
+    - passedQualityGate: Boolean
+    + calculateOverallRiskScore(): int
+    + getHighestSeverity(): Severity
+}
+
+class ExtractedComponent {
+    - componentId: String
+    - name: String
+    - type: String
+    + getAssociatedThreats(): List<Threat>
+}
+
+class Threat {
+    - threatId: UUID
+    - title: String
+    - description: String
+    - technicalMitigation: String
+    - strideCategory: StrideCategory
+    - severity: Severity
+}
+
+' Define Relationships
+AnalysisReport "1" *-- "*" ExtractedComponent : analyzes >
+ExtractedComponent "1" *-- "0..*" Threat : identifies >
+
+' Notes for context
+note right of Threat
+  This entity represents the core concept
+  of "has severity". Every threat found 
+  by the AI is assigned a strict enum value.
+end note
+@enduml
