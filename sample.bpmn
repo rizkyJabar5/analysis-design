@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  id="Definitions_1">
+  <bpmn:collaboration id="Collaboration_1">
+    <bpmn:participant id="Participant_User" name="User" processRef="Process_1"/>
+    <bpmn:participant id="Participant_System" name="Backend System" processRef="Process_2"/>
+    <bpmn:messageFlow id="MsgFlow_1" name="Login Request" sourceRef="Participant_User" targetRef="Participant_System"/>
+  </bpmn:collaboration>
+  <bpmn:process id="Process_1" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_1"/>
+    <bpmn:userTask id="UserTask_Login" name="Fill Login Form"/>
+    <bpmn:serviceTask id="ServiceTask_Auth" name="Authenticate User"/>
+    <bpmn:scriptTask id="ScriptTask_Log" name="Log Activity"/>
+    <bpmn:sendTask id="SendTask_Notify" name="Send Notification"/>
+    <bpmn:receiveTask id="ReceiveTask_Response" name="Await Response"/>
+    <bpmn:sequenceFlow id="Flow_1" name="" sourceRef="StartEvent_1" targetRef="UserTask_Login"/>
+    <bpmn:sequenceFlow id="Flow_2" name="" sourceRef="UserTask_Login" targetRef="ServiceTask_Auth"/>
+    <bpmn:sequenceFlow id="Flow_3" name="" sourceRef="ServiceTask_Auth" targetRef="ScriptTask_Log"/>
+    <bpmn:dataStoreReference id="DataStore_UserDB" name="User Database"/>
+    <bpmn:dataStoreReference id="DataStore_AuditLog" name="Audit Log"/>
+  </bpmn:process>
+</bpmn:definitions>

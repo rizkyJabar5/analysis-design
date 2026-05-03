@@ -1,0 +1,20 @@
+@startuml
+' Sample PUML for parser tests
+title Sample Login Flow
+skinparam shadowing false
+
+actor "End User" as user
+participant "Web App" as web
+boundary "Auth Boundary" as boundary
+component "Auth Service" as auth
+database "User DB" as udb
+queue "Audit Queue" as q
+
+user -> web : open login
+web --> boundary : credentials
+boundary -> auth : validate
+auth -> udb : lookup
+udb --> auth : profile
+auth ..> q : emit event
+auth <-- web : reject when invalid
+@enduml
