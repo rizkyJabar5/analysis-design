@@ -3,9 +3,12 @@ pipeline {
 
     environment {
         BACKEND_API_URL = 'https://343e-103-145-224-199.ngrok-free.app/api/v1/analyze' 
-        
-        // Token otorisasi (kosongkan nilainya jika backend belum pakai auth)
         // API_TOKEN = credentials('backend-api-token') 
+    }
+
+    // Mengatur agar Jenkins tidak otomatis gagal jika proses memakan waktu agak lama
+    options {
+        timeout(time: 15, unit: 'MINUTES') 
     }
 
     stages {
@@ -20,18 +23,30 @@ pipeline {
             steps {
                 script {
                     echo 'Mencari file desain yang baru saja di-commit...'
-                    // Mengambil daftar file yang berubah
-                    env.CHANGED_FILES = sh(
+                    
+                    // 1. Mencoba mencari dari Git History
+                    def files = sh(
                         script: "git diff-tree --no-commit-id --name-only -r HEAD | grep -E '\\.(xml|puml|uml|jpg|jpeg|png)\$' || true",
                         returnStdout: true
                     ).trim()
 
+                    // 2. FALLBACK: Jika Git diff kosong (sering terjadi di build pertama Jenkins), 
+                    // cari SEMUA file desain di repositori agar API tetap berjalan.
+                    if (files == "") {
+                        echo "⚠️ Git diff tidak mendeteksi perubahan (Mungkin build pertama atau shallow clone)."
+                        echo "🔍 FALLBACK: Memindai seluruh file desain di repositori..."
+                        files = sh(
+                            script: "find . -type f \\( -name '*.xml' -o -name '*.puml' -o -name '*.uml' -o -name '*.jpg' -o -name '*.png' \\) | sed 's|^./||' || true",
+                            returnStdout: true
+                        ).trim()
+                    }
+
+                    env.CHANGED_FILES = files
+
                     if (env.CHANGED_FILES == "") {
-                        echo "Tidak ada file desain yang relevan pada commit ini. Pipeline dilewati."
-                        currentBuild.result = 'SUCCESS'
-                        sh "exit 0" 
+                        echo "Tidak ada satupun file desain di dalam repositori ini. Pipeline dilewati."
                     } else {
-                        echo "File desain ditemukan:\n${env.CHANGED_FILES}"
+                        echo "File desain yang akan dikirim ke Backend:\n${env.CHANGED_FILES}"
                     }
                 }
             }
@@ -43,7 +58,7 @@ pipeline {
             }
             steps {
                 script {
-                    def files = env.CHANGED_FILES.split('\n')
+                    def fileArray = env.CHANGED_FILES.split('\n')
                     def pipelineFailed = false
 
                     // Menyiapkan header untuk file HTML
@@ -53,14 +68,18 @@ pipeline {
                     echo '</head><body>' >> summary.html
                     """
 
-                    for (int i = 0; i < files.size(); i++) {
-                        def file = files[i]
+                    for (int i = 0; i < fileArray.size(); i++) {
+                        def file = fileArray[i].trim()
+                        if (file == "") continue
+
                         echo "------------------------------------------------"
                         echo "🚀 Mengirim file ke Backend: ${file}"
+                        echo "⏳ Menunggu proses analisa dari AI (Mohon bersabar, ini memakan waktu)..."
 
-                        // Hit API Backend menggunakan cURL dan simpan ke raw_response.txt
+                        // Hit API Backend menggunakan cURL
+                        // Ditambahkan timeout spesifik di curl agar tidak hang selamanya jika ngrok bermasalah
                         sh """
-                        curl -s -w "\\n%{http_code}" -X POST ${BACKEND_API_URL} \
+                        curl -s -S -w "\\n%{http_code}" --max-time 600 -X POST ${BACKEND_API_URL} \
                              -F "design_file=@${file}" > raw_response.txt
                         """
 
@@ -68,27 +87,25 @@ pipeline {
                         def responseLines = readFile('raw_response.txt').split('\n')
                         def httpStatus = responseLines[-1].trim()
                         
-                        // Gabungkan baris body dan simpan sebagai file JSON murni
                         def jsonBody = responseLines[0..-2].join('\n')
                         writeFile file: 'response.json', text: jsonBody
 
                         if (httpStatus != "200") {
                             echo "❌ ERROR: Backend mengembalikan status HTTP ${httpStatus}"
+                            echo "Isi Response: ${jsonBody}"
                             pipelineFailed = true
                             continue
                         }
 
-                        // Parse JSON menggunakan jq membaca dari file response.json
+                        // Parse JSON
                         def isPassed = sh(script: "jq -r '.passedQualityGate' response.json", returnStdout: true).trim()
                         def reportPdf = sh(script: "jq -r '.downloadLinks.pdf' response.json", returnStdout: true).trim()
                         def securityScore = sh(script: "jq -r '.score' response.json", returnStdout: true).trim()
                         def totalThreats = sh(script: "jq '.threats | length' response.json", returnStdout: true).trim()
 
-                        // Cetak log di terminal Jenkins
                         echo "📊 HASIL ANALISA: ${file}"
                         echo "Skor: ${securityScore}/100 | Quality Gate Passed: ${isPassed}"
                         
-                        // Menulis Header Laporan ke HTML
                         def statusColor = (isPassed == "true") ? "green" : "red"
                         def statusText = (isPassed == "true") ? "LOLOS (AMAN)" : "GAGAL (RENTAN)"
                         
@@ -103,9 +120,8 @@ pipeline {
                         echo '<h3>Detail Ancaman Berdasarkan Komponen:</h3>' >> summary.html
                         """
 
-                        // Looping Threats menggunakan jq dan render HTML Card
                         sh '''
-                        jq -r '.threats[] | "<div class=\\"threat-card \\(.severity)\\"><h4 style=\\"margin-top:0; color:#444;\\">🚨 \\(.componentName) - \\(.strideCategory) [\\(.severity)]</h4><p><strong>Temuan:</strong> \\(.description)</p><p><strong>Mitigasi Teknikal:</strong> <em>\\(.technicalMitigation)</em></p></div>"' response.json >> summary.html
+                        jq -r '.threats[]? | "<div class=\\"threat-card \\(.severity)\\"><h4 style=\\"margin-top:0; color:#444;\\">🚨 \\(.componentName) - \\(.strideCategory) [\\(.severity)]</h4><p><strong>Temuan:</strong> \\(.description)</p><p><strong>Mitigasi Teknikal:</strong> <em>\\(.technicalMitigation)</em></p></div>"' response.json >> summary.html
                         '''
 
                         if (isPassed != "true") {
@@ -113,7 +129,6 @@ pipeline {
                         }
                     }
 
-                    // Tutup tag HTML
                     sh "echo '</body></html>' >> summary.html"
 
                     if (pipelineFailed) {
@@ -126,21 +141,19 @@ pipeline {
         }
     }
 
-    // TAHAP POST-ACTION: Publikasi Visual
     post {
         always {
             echo "Mempublikasikan Visualisasi HTML..."
             publishHTML([
-                allowMissing: false,
+                allowMissing: true,
                 alwaysLinkToLastBuild: true,
                 keepAll: true,
-                reportDir: '', // Kosong berarti di root workspace Jenkins
+                reportDir: '', 
                 reportFiles: 'summary.html',
                 reportName: 'Security Threat Summary',
                 reportTitles: 'Hasil Analisa Keamanan Desain'
             ])
             
-            // Bersihkan file sementara
             sh "rm -f raw_response.txt response.json"
         }
     }
