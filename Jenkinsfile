@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        BACKEND_API_URL = 'http://localhost:8080/api/v1/analyze' 
+        BACKEND_API_URL = 'https://343e-103-145-224-199.ngrok-free.app/api/v1/analyze' 
         
         // Token otorisasi (kosongkan nilainya jika backend belum pakai auth)
         // API_TOKEN = credentials('backend-api-token') 
