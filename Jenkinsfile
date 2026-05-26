@@ -133,8 +133,9 @@ pipeline {
 
                     if (pipelineFailed) {
                         error("🚨 Pipeline dihentikan! Quality Gate GAGAL karena terdapat kerentanan pada desain.")
-                    } else {
-                        echo "🎉 Semua desain berhasil lolos uji keamanan (Quality Gate PASSED)."
+                        error("🚨 Stop the pipeline! Failed Quality Gate because of design flaws.")
+                    } else {                    
+                        echo "🎉 All design to pass Quality Gate"
                     }
                 }
             }
@@ -143,7 +144,7 @@ pipeline {
 
     post {
         always {
-            echo "Mempublikasikan Visualisasi HTML..."
+            echo "📢 Publishing Visual Report..."
             publishHTML([
                 allowMissing: true,
                 alwaysLinkToLastBuild: true,
@@ -151,7 +152,7 @@ pipeline {
                 reportDir: '', 
                 reportFiles: 'summary.html',
                 reportName: 'Security Threat Summary',
-                reportTitles: 'Hasil Analisa Keamanan Desain'
+                reportTitles: 'Thee result of STRIDE Analysis for Design Files'
             ])
             
             sh "rm -f raw_response.txt response.json"
