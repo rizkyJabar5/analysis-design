@@ -1,0 +1,138 @@
+@startuml login-user-secure
+!theme plain
+title Use Case Diagram: Secure User Login (STRIDE-aligned controls)
+
+skinparam packageStyle rectangle
+skinparam usecase {
+    BackgroundColor #F5FAFF
+    BorderColor #1E5FB4
+}
+skinparam actor {
+    BackgroundColor #FFFFFF
+    BorderColor #444444
+}
+
+' ========== ACTORS ==========
+left to right direction
+
+actor "Registered User"            as User
+actor "Attacker"                   as Attacker  #LightCoral
+actor "Identity Provider\n(OIDC)"  as IdP
+actor "MFA Provider\n(TOTP/FIDO2)" as MFA
+actor "Risk / Fraud Engine"        as Risk
+actor "Audit & SIEM"               as SIEM
+actor "Notification Service"       as Notify
+
+' ========== SYSTEM BOUNDARY ==========
+rectangle "Secure Login System" as System {
+
+    ' --- Primary user-facing use cases ---
+    usecase "UC1\nRequest Login Page\n(over HTTPS / TLS 1.3)"            as UC_Request
+    usecase "UC2\nSubmit Credentials\n(cert-pinned, CSRF token)"         as UC_Submit
+    usecase "UC3\nComplete MFA Challenge\n(FIDO2 / WebAuthn / TOTP)"     as UC_MFA
+    usecase "UC4\nReceive Session Token\n(short-lived JWT, HttpOnly)"    as UC_Session
+    usecase "UC5\nLogout & Revoke Session"                               as UC_Logout
+    usecase "UC6\nRefresh Token\n(JWT rotation)"                        as UC_Refresh
+    usecase "UC7\nManage Active Sessions\n(view & revoke devices)"      as UC_Sessions
+    usecase "UC8\nPassword Reset /\nAccount Recovery"                   as UC_Recovery
+    usecase "UC9\nLockdown Account\n(compromise detected)"              as UC_Lockdown
+
+    ' --- STRIDE security controls ---
+    usecase "SC-S\nVerify User Identity\n(MFA + Device Binding)"             as SC_S  <<Spoofing>>
+    usecase "SC-T\nValidate Request Integrity\n(HMAC, CSRF, Schema)"         as SC_T  <<Tampering>>
+    usecase "SC-R\nWrite Signed Audit Log\n(WORM, non-repudiation)"          as SC_R  <<Repudiation>>
+    usecase "SC-I\nEncrypt Channel & Mask Data\n(TLS 1.3 + redacted logs)"   as SC_I  <<InformationDisclosure>>
+    usecase "SC-D\nRate-Limit & WAF / Lockout\n(brute-force + DDoS)"         as SC_D  <<DenialOfService>>
+    usecase "SC-E\nEnforce RBAC / ABAC\n(least-privilege scopes)"            as SC_E  <<ElevationOfPrivilege>>
+    usecase "SC-C\nContinuous Threat Monitoring\n(behavioral analysis)"    as SC_C  <<Repudiation>>
+
+    ' --- Attacker misuse cases ---
+    usecase "MC1\nCredential Stuffing /\nBrute-Force Login" as MC_Brute  <<Misuse>>  #FFE4E4
+    usecase "MC2\nReplay / Tamper\nLogin Request"           as MC_Replay <<Misuse>>  #FFE4E4
+    usecase "MC3\nSession Hijacking /\nToken Theft"         as MC_Hijack <<Misuse>>  #FFE4E4
+}
+
+' ========== ACTOR --> USE CASE ==========
+User --> UC_Request
+User --> UC_Submit
+User --> UC_MFA
+User --> UC_Session
+User --> UC_Logout
+User --> UC_Refresh
+User --> UC_Sessions
+User --> UC_Recovery
+User --> UC_Lockdown
+
+Attacker ..> MC_Brute  : attempts
+Attacker ..> MC_Replay : attempts
+Attacker ..> MC_Hijack : attempts
+
+' ========== INCLUDES (mandatory STRIDE controls) ==========
+UC_Submit  ..> SC_T : <<include>>
+UC_Submit  ..> SC_I : <<include>>
+UC_Submit  ..> SC_D : <<include>>
+UC_Submit  ..> SC_R : <<include>>
+
+UC_MFA     ..> SC_S : <<include>>
+UC_MFA     ..> SC_R : <<include>>
+
+UC_Session ..> SC_E : <<include>>
+UC_Session ..> SC_R : <<include>>
+UC_Session ..> SC_I : <<include>>
+
+UC_Logout  ..> SC_R : <<include>>
+
+UC_Refresh ..> SC_I : <<include>>
+UC_Refresh ..> SC_R : <<include>>
+
+UC_Sessions ..> SC_E : <<include>>
+UC_Sessions ..> SC_R : <<include>>
+
+UC_Recovery ..> SC_T : <<include>>
+UC_Recovery ..> SC_I : <<include>>
+UC_Recovery ..> SC_R : <<include>>
+
+UC_Lockdown ..> SC_R : <<include>>
+UC_Lockdown ..> SC_C : <<include>>
+
+' ========== EXTENDS (conditional controls) ==========
+SC_D ..> UC_Submit : <<extend>>\n(after N failures)
+SC_S ..> UC_MFA    : <<extend>>\n(if risk score high)
+
+' ========== STRIDE CONTROLS MITIGATE MISUSE ==========
+SC_D --> MC_Brute  : <<mitigates>>
+SC_S --> MC_Brute  : <<mitigates>>
+SC_T --> MC_Replay : <<mitigates>>
+SC_I --> MC_Hijack : <<mitigates>>
+SC_E --> MC_Hijack : <<mitigates>>
+SC_C --> MC_Hijack : <<mitigates>>
+
+' ========== SUPPORTING ACTORS ==========
+SC_S --> MFA  : challenge / verify
+SC_S --> IdP  : federated identity (OIDC)
+SC_S --> Risk : risk score lookup
+SC_R --> SIEM : ship signed events
+SC_D --> Risk : feed rate-limit signals
+SC_C --> Risk : continuous scoring
+SC_C --> Notify : alert on suspicious activity
+UC_Lockdown --> Notify : notify user
+
+' ========== LEGEND ==========
+legend right
+  |= Tag |= STRIDE Threat |= Control implemented |
+  |<#FFE4E4> Misuse | (attacker goal) | — |
+  | SC-S | Spoofing               | MFA + Device Binding |
+  | SC-T | Tampering              | HMAC + CSRF + Schema |
+  | SC-R | Repudiation            | Signed WORM Audit Log |
+  | SC-I | Information Disclosure | TLS 1.3 + Redaction |
+  | SC-D | Denial of Service      | Rate-Limit + WAF |
+  | SC-E | Elevation of Privilege | RBAC / ABAC scopes |
+  | SC-C | Continuous Monitoring  | Behavioral analysis + alerts |
+  |= New Use Cases | | |
+  | UC6 | Token Refresh | JWT rotation mechanism |
+  | UC7 | Session Mgmt | Device/session visibility & control |
+  | UC8 | Pwd Reset | Secure account recovery flow |
+  | UC9 | Lockdown | Compromise response |
+endlegend
+
+@enduml
