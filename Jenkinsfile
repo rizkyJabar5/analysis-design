@@ -19,6 +19,37 @@ pipeline {
             }
         }
 
+        stage('Prepare Tooling') {
+            steps {
+                script {
+                    sh '''
+                        set -e
+                        if command -v jq >/dev/null 2>&1; then
+                            echo "jq is available: $(jq --version)"
+                            exit 0
+                        fi
+
+                        mkdir -p .bin
+                        if [ ! -x .bin/jq ]; then
+                            ARCH=$(uname -m)
+                            case "$ARCH" in
+                                x86_64|amd64)   JQ_ARCH=linux-amd64 ;;
+                                aarch64|arm64)  JQ_ARCH=linux-arm64 ;;
+                                *) echo "Unsupported arch for jq auto-install: $ARCH"; exit 1 ;;
+                            esac
+                            echo "Downloading jq ($JQ_ARCH) to .bin/jq..."
+                            curl -sSL --fail -o .bin/jq \
+                                "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-${JQ_ARCH}"
+                            chmod +x .bin/jq
+                        fi
+                        echo "Local jq installed: $(.bin/jq --version)"
+                    '''
+                    // Prepend the workspace .bin dir so every later sh step sees jq.
+                    env.PATH = "${env.WORKSPACE}/.bin:${env.PATH}"
+                }
+            }
+        }
+
         stage('Validate Commit Files') {
             steps {
                 script {
