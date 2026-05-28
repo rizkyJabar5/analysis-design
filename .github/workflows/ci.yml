@@ -11,17 +11,16 @@ on:
         description: "Override Jenkins job name"
         required: false
 
-env:
-  JENKINS_URL: ${{ secrets.JENKINS_URL }}
-  JENKINS_USER: ${{ secrets.JENKINS_USER }}
-  JENKINS_TOKEN: ${{ secrets.JENKINS_TOKEN }}
-  JENKINS_JOB: ${{ github.event.inputs.jenkins_job || secrets.JENKINS_JOB }}
-
 jobs:
   trigger-jenkins:
     name: Trigger Jenkins Build
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # env:
+    #   JENKINS_URL: ${{ secrets.JENKINS_URL }}
+    #   JENKINS_USER: ${{ secrets.JENKINS_USER }}
+    #   JENKINS_TOKEN: ${{ secrets.JENKINS_TOKEN }}
+    #   JENKINS_JOB: ${{ github.event.inputs.jenkins_job || secrets.JENKINS_JOB }}
 
     steps:
       - name: Checkout
