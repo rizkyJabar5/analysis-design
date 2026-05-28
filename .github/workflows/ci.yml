@@ -1,4 +1,4 @@
-name: CI - Trigger Jenkins
+name: CI - Watch Jenkins
 
 on:
   push:
@@ -12,128 +12,84 @@ on:
         required: false
 
 jobs:
-  trigger-jenkins:
-    name: Trigger Jenkins Build
+  watch-jenkins:
+    name: Watch Jenkins Build
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    # Secrets are not available on PRs from forks — skip instead of failing.
+    timeout-minutes: 30
+    # Secrets are not available on PRs from forks — skip cleanly.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
 
     env:
       JENKINS_URL: ${{ secrets.JENKINS_URL }}
       JENKINS_USER: ${{ secrets.JENKINS_USER }}
       JENKINS_TOKEN: ${{ secrets.JENKINS_TOKEN }}
+      # Multibranch parent folder name (e.g. "my-app").
       JENKINS_JOB: ${{ github.event.inputs.jenkins_job || secrets.JENKINS_JOB }}
+      # On a PR, the GitHub Branch Source plugin creates a job called "PR-<number>".
+      # On a push, the branch job matches the ref name (e.g. "master", "feature/foo").
+      JENKINS_BRANCH: ${{ github.event_name == 'pull_request' && format('PR-{0}', github.event.pull_request.number) || github.ref_name }}
+      # Head SHA on PRs (Jenkins may also record the merge SHA — we match either).
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Validate Jenkins secrets
-        env:
-          JENKINS_URL: ${{ secrets.JENKINS_URL }}
-          JENKINS_USER: ${{ secrets.JENKINS_USER }}
-          JENKINS_TOKEN: ${{ secrets.JENKINS_TOKEN }}
-          JENKINS_JOB: ${{ github.event.inputs.jenkins_job || secrets.JENKINS_JOB }}
         run: |
           set -euo pipefail
           missing=0
-          for v in JENKINS_URL JENKINS_USER JENKINS_TOKEN JENKINS_JOB; do
+          for v in JENKINS_URL JENKINS_USER JENKINS_TOKEN JENKINS_JOB JENKINS_BRANCH; do
             if [ -z "${!v:-}" ]; then
               echo "::error::Missing required secret/env: $v"
               missing=1
             fi
           done
           if [ "$missing" -ne 0 ]; then
-            echo "::error::One or more Jenkins secrets are not configured."
-            echo "::error::Add them at: Settings → Secrets and variables → Actions → New repository secret"
-            echo "::error::Required names: JENKINS_URL, JENKINS_USER, JENKINS_TOKEN, JENKINS_JOB"
+            echo "::error::Add the missing values at Settings → Secrets and variables → Actions."
             exit 1
           fi
 
-      - name: Fetch CSRF crumb
-        id: crumb
+      - name: Find Jenkins build for ${{ env.HEAD_SHA }}
+        id: find
         run: |
           set -euo pipefail
-          CRUMB_JSON=$(curl -sS --fail \
-            -u "${JENKINS_USER}:${JENKINS_TOKEN}" \
-            "${JENKINS_URL%/}/crumbIssuer/api/json" || echo "")
+          ENC_PARENT=$(printf '%s' "${JENKINS_JOB}" | jq -sRr @uri)
+          ENC_BRANCH=$(printf '%s' "${JENKINS_BRANCH}" | jq -sRr @uri)
+          BRANCH_URL="${JENKINS_URL%/}/job/${ENC_PARENT}/job/${ENC_BRANCH}"
+          TREE='builds[number,url,building,result,actions[lastBuiltRevision[SHA1]]]'
 
-          if [ -n "$CRUMB_JSON" ] && echo "$CRUMB_JSON" | jq -e .crumb >/dev/null 2>&1; then
-            FIELD=$(echo "$CRUMB_JSON" | jq -r .crumbRequestField)
-            VALUE=$(echo "$CRUMB_JSON" | jq -r .crumb)
-            echo "header=${FIELD}: ${VALUE}" >> "$GITHUB_OUTPUT"
-            echo "Crumb acquired (${FIELD})"
-          else
-            echo "header=" >> "$GITHUB_OUTPUT"
-            echo "No CSRF crumb required (or crumb issuer disabled)."
-          fi
+          echo "Watching: $BRANCH_URL"
+          echo "Looking for SHA: $HEAD_SHA"
 
-      - name: Trigger Jenkins job
-        id: trigger
-        run: |
-          set -euo pipefail
-          ENC_JOB=$(echo -n "${JENKINS_JOB}" | jq -sRr @uri)
-          URL="${JENKINS_URL%/}/job/${ENC_JOB}/buildWithParameters"
-
-          ARGS=(-sS -i -o response.txt -w "%{http_code}"
-                -u "${JENKINS_USER}:${JENKINS_TOKEN}"
-                -X POST
-                --data-urlencode "GIT_BRANCH=${GITHUB_REF_NAME}"
-                --data-urlencode "GIT_COMMIT=${GITHUB_SHA}"
-                --data-urlencode "GITHUB_REPO=${GITHUB_REPOSITORY}"
-                --data-urlencode "TRIGGERED_BY=${GITHUB_ACTOR}")
-
-          if [ -n "${{ steps.crumb.outputs.header }}" ]; then
-            ARGS+=(-H "${{ steps.crumb.outputs.header }}")
-          fi
-
-          HTTP=$(curl "${ARGS[@]}" "$URL")
-          echo "HTTP $HTTP"
-          cat response.txt
-
-          if [ "$HTTP" != "201" ] && [ "$HTTP" != "200" ]; then
-            echo "::error::Jenkins refused the trigger (HTTP $HTTP)"
-            exit 1
-          fi
-
-          QUEUE_URL=$(grep -i '^location:' response.txt | awk '{print $2}' | tr -d '\r\n')
-          if [ -z "$QUEUE_URL" ]; then
-            echo "::error::No queue Location header returned by Jenkins"
-            exit 1
-          fi
-          echo "Queue item: $QUEUE_URL"
-          echo "queue_url=$QUEUE_URL" >> "$GITHUB_OUTPUT"
-
-      - name: Wait for build to start
-        id: build_url
-        run: |
-          set -euo pipefail
-          QUEUE_URL="${{ steps.trigger.outputs.queue_url }}"
+          # Jenkins receives the webhook asynchronously — give it time to scan the branch + enqueue.
           for i in $(seq 1 60); do
-            JSON=$(curl -sS --fail -u "${JENKINS_USER}:${JENKINS_TOKEN}" "${QUEUE_URL%/}/api/json" || true)
-            EXE_URL=$(echo "$JSON" | jq -r '.executable.url // empty')
-            if [ -n "$EXE_URL" ]; then
-              echo "Build started: $EXE_URL"
-              echo "url=$EXE_URL" >> "$GITHUB_OUTPUT"
-              exit 0
+            JSON=$(curl -sS -u "${JENKINS_USER}:${JENKINS_TOKEN}" \
+              "${BRANCH_URL}/api/json?tree=${TREE}" || echo "")
+
+            if [ -n "$JSON" ] && echo "$JSON" | jq -e .builds >/dev/null 2>&1; then
+              BUILD_URL=$(echo "$JSON" | jq -r --arg sha "$HEAD_SHA" '
+                .builds[]?
+                | select(any(.actions[]?; .lastBuiltRevision.SHA1 == $sha))
+                | .url' | head -n1)
+
+              if [ -n "$BUILD_URL" ]; then
+                echo "Matched build: $BUILD_URL"
+                echo "url=$BUILD_URL" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
             fi
-            CANCELLED=$(echo "$JSON" | jq -r '.cancelled // false')
-            if [ "$CANCELLED" = "true" ]; then
-              echo "::error::Queue item was cancelled before starting"
-              exit 1
-            fi
-            echo "Waiting for build to leave the queue... (${i}/60)"
-            sleep 5
+            echo "Waiting for Jenkins to register a build for ${HEAD_SHA} on ${JENKINS_BRANCH}... (${i}/60)"
+            sleep 10
           done
-          echo "::error::Timed out waiting for Jenkins build to start"
+
+          echo "::error::No Jenkins build found for commit ${HEAD_SHA} on branch ${JENKINS_BRANCH} after 10 minutes."
+          echo "::error::Verify the multibranch job '${JENKINS_JOB}' has scanned and created '${JENKINS_BRANCH}', and the webhook is firing."
           exit 1
 
       - name: Wait for build to finish
         id: result
         run: |
           set -euo pipefail
-          BUILD_URL="${{ steps.build_url.outputs.url }}"
+          BUILD_URL="${{ steps.find.outputs.url }}"
+          RESULT=""
           for i in $(seq 1 180); do
             JSON=$(curl -sS --fail -u "${JENKINS_USER}:${JENKINS_TOKEN}" "${BUILD_URL%/}/api/json" || true)
             RESULT=$(echo "$JSON" | jq -r '.result // empty')
@@ -148,8 +104,8 @@ jobs:
             sleep 10
           done
 
-          if [ -z "${RESULT:-}" ]; then
-            echo "::error::Timed out waiting for Jenkins build to finish"
+          if [ -z "$RESULT" ]; then
+            echo "::error::Timed out waiting for Jenkins build to finish — $BUILD_URL"
             exit 1
           fi
 
@@ -167,9 +123,8 @@ jobs:
           {
             echo "### Jenkins build"
             echo ""
-            echo "- Job: \`${JENKINS_JOB}\`"
-            echo "- Branch: \`${GITHUB_REF_NAME}\`"
-            echo "- Commit: \`${GITHUB_SHA}\`"
-            echo "- Build URL: ${{ steps.result.outputs.build_url || steps.build_url.outputs.url || 'n/a' }}"
+            echo "- Job: \`${JENKINS_JOB}/${JENKINS_BRANCH}\`"
+            echo "- Commit: \`${HEAD_SHA}\`"
+            echo "- Build URL: ${{ steps.result.outputs.build_url || steps.find.outputs.url || 'n/a' }}"
             echo "- Result: ${{ steps.result.outputs.result || 'n/a' }}"
           } >> "$GITHUB_STEP_SUMMARY"
