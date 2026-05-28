@@ -27,4 +27,68 @@ dbfw   --> auth   : profile
 auth   --> q      : signed audit event
 q      --> siem   : ship logs
 auth   --> web    : generic reject on invalid
+
+note right of waf
+  Mitigates S (waf):
+  validates and sanitizes all headers,
+  IP allowlist for backend access,
+  strict TLS with certificate pinning.
+end note
+
+note right of web
+  Mitigates R (web):
+  comprehensive audit logging of all user
+  actions and authentication attempts,
+  ships logs to SIEM with full forensic
+  context (user, IP, UA, request id).
+end note
+
+note right of auth
+  Mitigates E (auth):
+  short-lived JWTs (5-15 min) with refresh,
+  automated key rotation,
+  anomaly detection on token usage,
+  least-privilege Secret Manager access.
+end note
+
+note right of vault
+  Mitigates I (vault):
+  HSM-backed key storage,
+  least-privilege access policy,
+  audit log on every key access,
+  key versioning with automatic rotation.
+end note
+
+note right of dbfw
+  Mitigates I (dbfw):
+  parameterized queries only,
+  least-privilege DB account,
+  output validation before returning rows,
+  monitoring for unusual query patterns.
+end note
+
+note right of udb
+  Mitigates T (udb):
+  database audit logging on all writes,
+  row-level security policies,
+  database activity monitoring (DAM),
+  every modification traceable to a user.
+end note
+
+note right of q
+  Mitigates D (q):
+  rate limit on event ingestion,
+  bounded queue size with overflow policy,
+  backlog metrics + alerting,
+  dead-letter queue for spillover.
+end note
+
+note right of siem
+  Mitigates T (siem):
+  append-only immutable storage (WORM),
+  cryptographic signing for log integrity,
+  strict access controls,
+  alerting on unauthorized access attempts.
+end note
+
 @enduml
