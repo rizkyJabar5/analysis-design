@@ -1,20 +1,83 @@
-@startuml
-' Sample PUML for parser tests
-title Sample Login Flow
+@startuml secure-login-flow
+' Sample PUML for parser tests — hardened against the STRIDE findings from the backend.
+title Sample Login Flow (STRIDE-Hardened)
 skinparam shadowing false
 
 actor "End User" as user
+participant "CDN + WAF" as waf
 participant "Web App" as web
-boundary "Auth Boundary" as boundary
-component "Auth Service" as auth
-database "User DB" as udb
-queue "Audit Queue" as q
+boundary "Auth Gateway" as authgw
+control     "Auth Service"   as auth
+entity      "Secret Manager" as vault
+participant "DB Firewall"    as dbfw
+database    "User DB"        as udb
+queue       "Audit Queue"    as q
+participant "SIEM"           as siem
 
-user -> web : open login
-web --> boundary : credentials
-boundary -> auth : validate
-auth -> udb : lookup
-udb --> auth : profile
-auth ..> q : emit event
-auth <-- web : reject when invalid
+user   -->  waf    : HTTPS request
+waf    -->  web    : forward over TLS
+web    -->  web    : input validation
+web    --> authgw : credentials (mTLS)
+authgw ->  auth   : validate
+auth   ->  vault  : fetch signing keys
+auth   ->  dbfw   : query user
+dbfw   -->  udb    : authorized SELECT
+udb    --> dbfw   : profile
+dbfw   --> auth   : profile
+auth   --> q      : signed audit event
+q      --> siem   : ship logs
+auth   --> web    : generic reject on invalid
+
+note right of waf
+  Mitigates Web D and T:
+  rate-limit, WAF rules (OWASP CRS),
+  bot and scraping filters.
+end note
+
+note right of web
+  Mitigates Web S, T, I, R, E:
+  TLS 1.2+ with HSTS,
+  CSP and Subresource Integrity,
+  custom error pages and no debug in prod,
+  centralized auth logs,
+  OWASP secure coding, SAST and DAST in CI.
+end note
+
+note right of authgw
+  Mitigates S:
+  mTLS between Web App and Auth,
+  rejects non-mTLS clients.
+end note
+
+note right of auth
+  Mitigates E and R:
+  MFA required for admin actions,
+  least privilege,
+  tamper-evident auth logs,
+  account lockout and adaptive throttling.
+end note
+
+note right of dbfw
+  Mitigates DB I and E:
+  DB firewall blocks anomalous queries,
+  IDS alerts forwarded to SIEM.
+end note
+
+note right of udb
+  Mitigates DB T, I, D, E:
+  Transparent Data Encryption at rest,
+  TLS in transit from app tier,
+  least-privilege DB user (no DDL),
+  connection pooling and query timeout,
+  read replicas for resilience,
+  MFA for human admin access.
+end note
+
+note right of q
+  Mitigates R:
+  append-only signed audit events,
+  forwarded to SIEM for retention,
+  tamper-evident hash chain.
+end note
+
 @enduml
