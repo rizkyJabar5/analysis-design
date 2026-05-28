@@ -1,0 +1,393 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:open-bpmn="http://open-bpmn.org/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" exporter="Claude" exporterVersion="2.0" id="Definitions_SecureTransaction" targetNamespace="http://stride.example/secure">
+  <bpmn:process id="Process_SecurePayment" isExecutable="true" name="Secure User Payment Transaction" processType="Public">
+    <bpmn:documentation>
+      End-to-end secure user payment transaction.
+      Controls mapped to the components flagged by the STRIDE analyzer:
+
+        Mobile App (Client)
+          - Jailbreak/Root detection, Cert pinning, RASP, Code signing (Task_DeviceAttest)
+          - Biometric / FIDO2 / WebAuthn + MFA, Secure Keystore (Task_BiometricMFA)
+
+        Internet / Public Network
+          - TLS 1.3, HSTS, Cert pinning, WAF/CDN, DDoS mitigation, Rate Limit (Task_EdgeProtect)
+
+        API Gateway
+          - OAuth2 / OIDC, JWT issuer/audience validation, OpenAPI schema validation,
+            input sanitization, mTLS service-to-service, signed requests (Task_AuthnValidate)
+          - RBAC / ABAC, OPA policy enforcement, scope check (Task_AuthzPolicy)
+
+        Application Server
+          - Parameterized queries, allowlist input validation (Task_SanitizeQuery)
+          - Fraud / velocity / anomaly detection, behavioral monitoring (Task_FraudCheck)
+          - PCI Tokenization through HSM-backed Vault / KMS (Task_Tokenize)
+          - Centralized logging with PII redaction (Task_RedactedLog)
+
+        Third-Party Service (PSP)
+          - mTLS, signed payload, circuit breaker, retry/backoff (Task_CallPSP)
+          - Verify PSP response signature (HMAC / JWS) and schema (Task_VerifyPSP)
+
+        Database
+          - Transparent Data Encryption (TDE), KMS-managed keys, encrypted backups,
+            RBAC, audit triggers, query timeouts, constraints (DataStore_TxDB + DataStore_Backup)
+          - Immutable WORM audit log, signed entries (Task_AuditLog + DataStore_AuditLog)
+
+        User
+          - Session binding, device fingerprinting, masked UI, RBAC/ABAC (EndEvent_OK)
+    </bpmn:documentation>
+    <bpmn:extensionElements>
+      <open-bpmn:auto-align/>
+    </bpmn:extensionElements>
+    <bpmn:startEvent id="StartEvent_1" name="Begin Transaction">
+      <bpmn:documentation id="documentation_WV0CGQ"/>
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Task_DeviceAttest" name="Device Attestation (Jailbreak/Root Detection, Cert Pinning, RASP, Code Signing)">
+      <bpmn:documentation id="documentation_BRmQrQ"/>
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="Task_BiometricMFA" name="Biometric Login + MFA (FIDO2/WebAuthn, Secure Keystore)">
+      <bpmn:documentation id="documentation_bBDkrw"/>
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:serviceTask id="Task_EdgeProtect" name="Edge Protection (TLS 1.3 + HSTS + Cert Pinning + WAF + DDoS Mitigation + Rate Limit)">
+      <bpmn:documentation id="documentation_C1Lz7g"/>
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_AuthnValidate" name="Validate OAuth2/OIDC + JWT (issuer/audience) + OpenAPI Schema + HMAC Signature">
+      <bpmn:documentation id="documentation_laxRLQ"/>
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_Auth" name="Authenticated?">
+      <bpmn:documentation id="documentation_HjJzdg"/>
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_NoAuth</bpmn:outgoing>
+      <bpmn:outgoing>Flow_6</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="EndEvent_Reject" name="Reject 401/403 + Sanitized Error + Audit">
+      <bpmn:documentation id="documentation_yAqD9w"/>
+      <bpmn:incoming>Flow_NoAuth</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:serviceTask id="Task_AuthzPolicy" name="RBAC/ABAC + OPA Policy + Scope Check (least privilege)">
+      <bpmn:documentation id="documentation_xCq5Rg"/>
+      <bpmn:incoming>Flow_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_7</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_SanitizeQuery" name="Input Validation + Allowlist + Parameterized Queries (anti-injection)">
+      <bpmn:documentation id="documentation_dAkzBA"/>
+      <bpmn:incoming>Flow_7</bpmn:incoming>
+      <bpmn:outgoing>Flow_8</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_FraudCheck" name="Fraud + Velocity + Anomaly Detection (behavioral monitoring)">
+      <bpmn:documentation id="documentation_rdlM9A"/>
+      <bpmn:incoming>Flow_8</bpmn:incoming>
+      <bpmn:outgoing>Flow_9</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_Tokenize" name="Tokenize PAN via HSM Vault + KMS (PCI DSS)">
+      <bpmn:documentation id="documentation_UQDK5w"/>
+      <bpmn:incoming>Flow_9</bpmn:incoming>
+      <bpmn:outgoing>Flow_10</bpmn:outgoing>
+      <bpmn:property id="Prop_VaultRef" name="__targetRef_placeholder"/>
+      <bpmn:dataInputAssociation id="DIA_Vault">
+        <bpmn:sourceRef>DataStore_Vault</bpmn:sourceRef>
+        <bpmn:targetRef>Prop_VaultRef</bpmn:targetRef>
+      </bpmn:dataInputAssociation>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_CallPSP" name="Call PSP via mTLS + Signed Payload + Circuit Breaker + Retry/Backoff">
+      <bpmn:documentation id="documentation_mgBSBw"/>
+      <bpmn:incoming>Flow_10</bpmn:incoming>
+      <bpmn:outgoing>Flow_11</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_VerifyPSP" name="Verify PSP Response Signature (HMAC/JWS) + Schema Validation">
+      <bpmn:documentation id="documentation_hffjMA"/>
+      <bpmn:incoming>Flow_11</bpmn:incoming>
+      <bpmn:outgoing>Flow_12</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_Persist" name="Persist Transaction (TDE + KMS Keys + Constraints + Query Timeout + RBAC)">
+      <bpmn:documentation id="documentation_y0m00A"/>
+      <bpmn:incoming>Flow_12</bpmn:incoming>
+      <bpmn:outgoing>Flow_13</bpmn:outgoing>
+      <bpmn:dataOutputAssociation id="DOA_TxDB">
+        <bpmn:targetRef>DataStore_TxDB</bpmn:targetRef>
+      </bpmn:dataOutputAssociation>
+      <bpmn:dataOutputAssociation id="DOA_Backup">
+        <bpmn:targetRef>DataStore_Backup</bpmn:targetRef>
+      </bpmn:dataOutputAssociation>
+    </bpmn:serviceTask>
+    <bpmn:scriptTask id="Task_AuditLog" name="Sign &amp; Append Audit Log (WORM, immutable, tamper-evident)">
+      <bpmn:documentation id="documentation_2R5Vcw"/>
+      <bpmn:incoming>Flow_13</bpmn:incoming>
+      <bpmn:outgoing>Flow_14</bpmn:outgoing>
+      <bpmn:dataOutputAssociation id="DOA_Audit">
+        <bpmn:targetRef>DataStore_AuditLog</bpmn:targetRef>
+      </bpmn:dataOutputAssociation>
+      <bpmn:script id="script_a3becA"/>
+    </bpmn:scriptTask>
+    <bpmn:serviceTask id="Task_RedactedLog" name="Centralized Logging with PII/Token Redaction (encrypted at rest)">
+      <bpmn:documentation id="documentation_HYxHuw"/>
+      <bpmn:incoming>Flow_14</bpmn:incoming>
+      <bpmn:outgoing>Flow_15</bpmn:outgoing>
+      <bpmn:dataOutputAssociation id="DOA_Logs">
+        <bpmn:targetRef>DataStore_Logs</bpmn:targetRef>
+      </bpmn:dataOutputAssociation>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="EndEvent_OK" name="Signed Masked Receipt (no PAN, session-bound)">
+      <bpmn:documentation id="documentation_SGllUw"/>
+      <bpmn:incoming>Flow_15</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:dataStoreReference id="DataStore_Vault" name="Secrets Vault (HSM + KMS, rotating keys)">
+      <bpmn:documentation id="documentation_FmgpyQ"/>
+    </bpmn:dataStoreReference>
+    <bpmn:dataStoreReference id="DataStore_TxDB" name="Transactions DB (TDE, KMS, RBAC, audit triggers)">
+      <bpmn:documentation id="documentation_NBiqsg"/>
+    </bpmn:dataStoreReference>
+    <bpmn:dataStoreReference id="DataStore_Backup" name="Encrypted Off-site Backup (TDE)">
+      <bpmn:documentation id="documentation_mKqS6Q"/>
+    </bpmn:dataStoreReference>
+    <bpmn:dataStoreReference id="DataStore_AuditLog" name="Immutable Audit Log (WORM, signed)">
+      <bpmn:documentation id="documentation_c0QBHQ"/>
+    </bpmn:dataStoreReference>
+    <bpmn:dataStoreReference id="DataStore_Logs" name="Centralized Logs (redacted, encrypted, restricted access)">
+      <bpmn:documentation id="documentation_4y03xw"/>
+    </bpmn:dataStoreReference>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="StartEvent_1" targetRef="Task_DeviceAttest">
+      <bpmn:documentation id="documentation_NqMVgQ"/>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Task_DeviceAttest" targetRef="Task_BiometricMFA">
+      <bpmn:documentation id="documentation_0nUa4A"/>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Task_BiometricMFA" targetRef="Task_EdgeProtect">
+      <bpmn:documentation id="documentation_StCKzQ"/>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Task_EdgeProtect" targetRef="Task_AuthnValidate">
+      <bpmn:documentation id="documentation_z4ohog"/>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="Task_AuthnValidate" targetRef="Gateway_Auth">
+      <bpmn:documentation id="documentation_J0lJWQ"/>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_NoAuth" name="No" sourceRef="Gateway_Auth" targetRef="EndEvent_Reject">
+      <bpmn:documentation id="documentation_EXuR6g"/>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_6" name="Yes" sourceRef="Gateway_Auth" targetRef="Task_AuthzPolicy">
+      <bpmn:documentation id="documentation_0xElwQ"/>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_7" sourceRef="Task_AuthzPolicy" targetRef="Task_SanitizeQuery">
+      <bpmn:documentation id="documentation_0V75DA"/>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_8" sourceRef="Task_SanitizeQuery" targetRef="Task_FraudCheck">
+      <bpmn:documentation id="documentation_DTiv3g"/>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_9" sourceRef="Task_FraudCheck" targetRef="Task_Tokenize">
+      <bpmn:documentation id="documentation_WDGZ0A"/>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_10" sourceRef="Task_Tokenize" targetRef="Task_CallPSP">
+      <bpmn:documentation id="documentation_Q9KysA"/>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_11" sourceRef="Task_CallPSP" targetRef="Task_VerifyPSP">
+      <bpmn:documentation id="documentation_bwdX6A"/>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_12" sourceRef="Task_VerifyPSP" targetRef="Task_Persist">
+      <bpmn:documentation id="documentation_LFzVcQ"/>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_13" sourceRef="Task_Persist" targetRef="Task_AuditLog">
+      <bpmn:documentation id="documentation_zj9Jng"/>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_14" sourceRef="Task_AuditLog" targetRef="Task_RedactedLog">
+      <bpmn:documentation id="documentation_8Jwhsw"/>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_15" sourceRef="Task_RedactedLog" targetRef="EndEvent_OK">
+      <bpmn:documentation id="documentation_qhh0bg"/>
+    </bpmn:sequenceFlow>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane bpmnElement="Process_SecurePayment" id="BPMNPlane_1">
+      <bpmndi:BPMNShape bpmnElement="StartEvent_1" id="StartEvent_1_di">
+        <dc:Bounds height="36" width="36" x="152" y="182"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds height="14" width="76" x="135" y="225"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="Task_DeviceAttest" id="Task_DeviceAttest_di">
+        <dc:Bounds height="80" width="120" x="240" y="160"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="Task_BiometricMFA" id="Task_BiometricMFA_di">
+        <dc:Bounds height="80" width="120" x="410" y="160"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="Task_EdgeProtect" id="Task_EdgeProtect_di">
+        <dc:Bounds height="80" width="120" x="580" y="160"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="Task_AuthnValidate" id="Task_AuthnValidate_di">
+        <dc:Bounds height="80" width="120" x="750" y="160"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="Gateway_Auth" id="Gateway_Auth_di" isMarkerVisible="true">
+        <dc:Bounds height="50" width="50" x="920" y="175"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds height="14" width="74" x="908" y="145"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="EndEvent_Reject" id="EndEvent_Reject_di">
+        <dc:Bounds height="36" width="36" x="927" y="60"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds height="28" width="130" x="880" y="30"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="Task_AuthzPolicy" id="Task_AuthzPolicy_di">
+        <dc:Bounds height="80" width="120" x="1020" y="160"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="Task_SanitizeQuery" id="Task_SanitizeQuery_di">
+        <dc:Bounds height="80" width="120" x="1190" y="160"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="Task_FraudCheck" id="Task_FraudCheck_di">
+        <dc:Bounds height="80" width="120" x="1360" y="160"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="Task_Tokenize" id="Task_Tokenize_di">
+        <dc:Bounds height="80" width="120" x="1530" y="160"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="Task_CallPSP" id="Task_CallPSP_di">
+        <dc:Bounds height="80" width="120" x="1700" y="160"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="Task_VerifyPSP" id="Task_VerifyPSP_di">
+        <dc:Bounds height="80" width="120" x="1870" y="160"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="Task_Persist" id="Task_Persist_di">
+        <dc:Bounds height="80" width="120" x="2040" y="160"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="Task_AuditLog" id="Task_AuditLog_di">
+        <dc:Bounds height="80" width="120" x="2210" y="160"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="Task_RedactedLog" id="Task_RedactedLog_di">
+        <dc:Bounds height="80" width="120" x="2380" y="160"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="EndEvent_OK" id="EndEvent_OK_di">
+        <dc:Bounds height="36" width="36" x="2552" y="182"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds height="28" width="140" x="2500" y="225"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="DataStore_Vault" id="DataStore_Vault_di">
+        <dc:Bounds height="50" width="50" x="1565" y="320"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds height="28" width="160" x="1510" y="378"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="DataStore_TxDB" id="DataStore_TxDB_di">
+        <dc:Bounds height="50" width="50" x="2055" y="320"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds height="28" width="160" x="2000" y="378"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="DataStore_Backup" id="DataStore_Backup_di">
+        <dc:Bounds height="50" width="50" x="2135" y="320"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds height="28" width="160" x="2080" y="378"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="DataStore_AuditLog" id="DataStore_AuditLog_di">
+        <dc:Bounds height="50" width="50" x="2245" y="320"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds height="28" width="160" x="2190" y="378"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="DataStore_Logs" id="DataStore_Logs_di">
+        <dc:Bounds height="50" width="50" x="2415" y="320"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds height="28" width="180" x="2350" y="378"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge bpmnElement="Flow_1" id="Flow_1_di">
+        <di:waypoint x="188.0" y="200.0"/>
+        <di:waypoint x="240.0" y="200.0"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="Flow_2" id="Flow_2_di">
+        <di:waypoint x="360.0" y="200.0"/>
+        <di:waypoint x="410.0" y="200.0"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="Flow_3" id="Flow_3_di">
+        <di:waypoint x="530.0" y="200.0"/>
+        <di:waypoint x="580.0" y="200.0"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="Flow_4" id="Flow_4_di">
+        <di:waypoint x="700.0" y="200.0"/>
+        <di:waypoint x="750.0" y="200.0"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="Flow_5" id="Flow_5_di">
+        <di:waypoint x="870.0" y="200.0"/>
+        <di:waypoint x="920.0" y="200.0"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="Flow_NoAuth" id="Flow_NoAuth_di">
+        <di:waypoint x="945.0" y="175.0"/>
+        <di:waypoint x="945.0" y="96.0"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds height="14" width="14" x="951" y="130"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="Flow_6" id="Flow_6_di">
+        <di:waypoint x="970.0" y="200.0"/>
+        <di:waypoint x="1020.0" y="200.0"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds height="14" width="18" x="978" y="180"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="Flow_7" id="Flow_7_di">
+        <di:waypoint x="1140.0" y="200.0"/>
+        <di:waypoint x="1190.0" y="200.0"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="Flow_8" id="Flow_8_di">
+        <di:waypoint x="1310.0" y="200.0"/>
+        <di:waypoint x="1360.0" y="200.0"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="Flow_9" id="Flow_9_di">
+        <di:waypoint x="1480.0" y="200.0"/>
+        <di:waypoint x="1530.0" y="200.0"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="Flow_10" id="Flow_10_di">
+        <di:waypoint x="1650.0" y="200.0"/>
+        <di:waypoint x="1700.0" y="200.0"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="Flow_11" id="Flow_11_di">
+        <di:waypoint x="1820.0" y="200.0"/>
+        <di:waypoint x="1870.0" y="200.0"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="Flow_12" id="Flow_12_di">
+        <di:waypoint x="1990.0" y="200.0"/>
+        <di:waypoint x="2040.0" y="200.0"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="Flow_13" id="Flow_13_di">
+        <di:waypoint x="2160.0" y="200.0"/>
+        <di:waypoint x="2210.0" y="200.0"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="Flow_14" id="Flow_14_di">
+        <di:waypoint x="2330.0" y="200.0"/>
+        <di:waypoint x="2380.0" y="200.0"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="Flow_15" id="Flow_15_di">
+        <di:waypoint x="2500.0" y="200.0"/>
+        <di:waypoint x="2552.0" y="200.0"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="DIA_Vault" id="DIA_Vault_di">
+        <di:waypoint x="1590" y="320"/>
+        <di:waypoint x="1590" y="240"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="DOA_TxDB" id="DOA_TxDB_di">
+        <di:waypoint x="2080" y="240"/>
+        <di:waypoint x="2080" y="320"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="DOA_Backup" id="DOA_Backup_di">
+        <di:waypoint x="2120" y="240"/>
+        <di:waypoint x="2160" y="320"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="DOA_Audit" id="DOA_Audit_di">
+        <di:waypoint x="2270" y="240"/>
+        <di:waypoint x="2270" y="320"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="DOA_Logs" id="DOA_Logs_di">
+        <di:waypoint x="2440" y="240"/>
+        <di:waypoint x="2440" y="320"/>
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>
