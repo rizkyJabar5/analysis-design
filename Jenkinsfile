@@ -80,7 +80,7 @@ pipeline {
             }
         }
 
-        stage('Analyze & Render Visual') {
+        stage('Analyze Designs') {
             when {
                 expression { env.CHANGED_FILES != "" }
             }
@@ -88,22 +88,9 @@ pipeline {
                 script {
                     def fileArray = env.CHANGED_FILES.split('\n')
                     def pipelineFailed = false
+                    def results = []   // Per-file rows for the final summary.
 
                     sh "mkdir -p reports"
-
-                    writeFile file: 'summary.html', text: '''<!DOCTYPE html>
-<html><head><title>Design Security Report</title>
-<style>
-body{font-family:"Segoe UI",Tahoma,sans-serif;padding:20px;color:#333;line-height:1.6;}
-.header{background:#f8f9fa;padding:20px;border-radius:8px;margin-bottom:20px;}
-.threat-card{border:1px solid #ddd;padding:15px;margin-bottom:15px;border-radius:8px;}
-.CRITICAL{border-left:6px solid #dc3545;background:#fff5f5;}
-.HIGH{border-left:6px solid #fd7e14;background:#fff9f4;}
-.MEDIUM{border-left:6px solid #ffc107;background:#fffdf5;}
-.LOW{border-left:6px solid #17a2b8;}
-.btn{display:inline-block;padding:10px 15px;background:#007bff;color:white;text-decoration:none;border-radius:5px;font-weight:bold;margin-top:10px;}
-</style></head><body>
-'''
 
                     for (int i = 0; i < fileArray.size(); i++) {
                         def file = fileArray[i].trim()
@@ -113,7 +100,6 @@ body{font-family:"Segoe UI",Tahoma,sans-serif;padding:20px;color:#333;line-heigh
                         echo "Sending file to backend: ${file}"
 
                         // Body goes to response.json; HTTP code comes back via stdout.
-                        // Cleaner than mixing body + status in one file and parsing them apart.
                         def httpStatus = sh(
                             script: """
                                 curl -s -o response.json -w '%{http_code}' \
@@ -128,6 +114,7 @@ body{font-family:"Segoe UI",Tahoma,sans-serif;padding:20px;color:#333;line-heigh
                             echo "ERROR: Backend returned HTTP ${httpStatus}"
                             sh "cat response.json || true"
                             pipelineFailed = true
+                            results << [file: file, status: "HTTP ${httpStatus}", score: "—", threats: "—", link: ""]
                             continue
                         }
 
@@ -138,13 +125,12 @@ body{font-family:"Segoe UI",Tahoma,sans-serif;padding:20px;color:#333;line-heigh
                         def totalThreats  = sh(script: "jq    '.threats | length'            response.json", returnStdout: true).trim()
 
                         def passed = (isPassed == "true")
-                        def statusColor = passed ? "green" : "red"
-                        def statusText  = passed ? "PASSED (SECURE)" : "FAILED (VULNERABLE)"
+                        def statusText = passed ? "PASSED" : "FAILED"
 
-                        echo "Score: ${securityScore}/100 | Quality Gate: ${statusText} | Threats: ${totalThreats}"
+                        echo "Result: ${statusText} | Score: ${securityScore}/100 | Threats: ${totalThreats}"
 
                         // Quality gate failed → download the PDF report and stash it as a Jenkins artifact.
-                        def archivedPdf = ""
+                        def pdfLink = ""
                         if (!passed && reportPdfPath) {
                             def pdfUrl   = "${BACKEND_BASE_URL}${reportPdfPath}"
                             def safeName = file.replaceAll('[^A-Za-z0-9._-]', '_')
@@ -157,43 +143,56 @@ body{font-family:"Segoe UI",Tahoma,sans-serif;padding:20px;color:#333;line-heigh
                             ).trim()
 
                             if (pdfStatus == "200") {
-                                echo "Saved PDF report to ${pdfFile}"
-                                archivedPdf = pdfFile
+                                pdfLink = "${env.BUILD_URL}artifact/${pdfFile}"
+                                echo "PDF report archived: ${pdfLink}"
                             } else {
-                                echo "WARNING: PDF download failed (HTTP ${pdfStatus}) — ${pdfUrl}"
+                                echo "WARNING: PDF download failed (HTTP ${pdfStatus}) — falling back to backend URL"
+                                pdfLink = pdfUrl
                                 sh "rm -f '${pdfFile}'"
                             }
                         }
 
-                        def reportLink = ""
-                        if (archivedPdf) {
-                            reportLink = "<a href=\"${env.BUILD_URL}artifact/${archivedPdf}\" target=\"_blank\" class=\"btn\">Download PDF Report</a>"
-                        } else if (reportPdfPath) {
-                            reportLink = "<a href=\"${BACKEND_BASE_URL}${reportPdfPath}\" target=\"_blank\" class=\"btn\">Download PDF Report</a>"
-                        }
-
-                        def header = """<div class="header">
-  <h2>Design File: ${file}</h2>
-  <p><strong>STRIDE Security Score:</strong> ${securityScore}/100</p>
-  <p><strong>Quality Gate Status:</strong> <span style="color:${statusColor};font-weight:bold;">${statusText}</span></p>
-  <p><strong>Total Threats:</strong> ${totalThreats}</p>
-  ${reportLink}
-</div>
-<h3>Threat Details by Component:</h3>
-"""
-                        writeFile file: '_header.html', text: header
-                        sh 'cat _header.html >> summary.html && rm -f _header.html'
-
-                        sh '''
-                        jq -r '.threats[]? | "<div class=\\"threat-card \\(.severity)\\"><h4 style=\\"margin-top:0;color:#444;\\">\\(.componentName) - \\(.strideCategory) [\\(.severity)]</h4><p><strong>Finding:</strong> \\(.description)</p><p><strong>Technical Mitigation:</strong> <em>\\(.technicalMitigation)</em></p></div>"' response.json >> summary.html
-                        '''
+                        results << [
+                            file: file,
+                            status: statusText,
+                            score: "${securityScore}/100",
+                            threats: totalThreats,
+                            link: pdfLink
+                        ]
 
                         if (!passed) {
                             pipelineFailed = true
                         }
                     }
 
-                    sh "echo '</body></html>' >> summary.html"
+                    // Final clickable-link summary printed to the build console.
+                    echo "================================================"
+                    echo "  STRIDE Analysis Summary"
+                    echo "================================================"
+                    for (r in results) {
+                        echo ""
+                        echo "• ${r.file}"
+                        echo "    Status:  ${r.status}"
+                        echo "    Score:   ${r.score}"
+                        echo "    Threats: ${r.threats}"
+                        if (r.link) {
+                            echo "    Report:  ${r.link}"
+                        }
+                    }
+                    echo ""
+                    echo "================================================"
+
+                    // Add the same summary to the build description so it
+                    // shows clickable on the build page (Jenkins linkifies URLs).
+                    def desc = new StringBuilder()
+                    desc << "STRIDE Analysis Results:\n"
+                    for (r in results) {
+                        desc << "\n• ${r.file} — ${r.status} (score ${r.score}, ${r.threats} threats)"
+                        if (r.link) {
+                            desc << "\n  Report: ${r.link}"
+                        }
+                    }
+                    currentBuild.description = desc.toString()
 
                     if (pipelineFailed) {
                         error("Pipeline stopped: Quality Gate FAILED — vulnerabilities found in one or more design files.")
@@ -207,20 +206,8 @@ body{font-family:"Segoe UI",Tahoma,sans-serif;padding:20px;color:#333;line-heigh
 
     post {
         always {
-            echo "Publishing visual report..."
-            publishHTML([
-                allowMissing: true,
-                alwaysLinkToLastBuild: true,
-                keepAll: true,
-                reportDir: '',
-                reportFiles: 'summary.html',
-                reportName: 'Security Threat Summary',
-                reportTitles: 'STRIDE Analysis Result for Design Files'
-            ])
-
             archiveArtifacts artifacts: 'reports/*.pdf', allowEmptyArchive: true, fingerprint: true
-
-            sh "rm -f raw_response.txt response.json"
+            sh "rm -f response.json"
         }
     }
 }

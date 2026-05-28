@@ -123,47 +123,105 @@ jobs:
           echo "::error::Verify the multibranch job '${JENKINS_JOB}' has scanned and created '${JENKINS_BRANCH}', and the webhook is firing."
           exit 1
 
-      - name: Wait for build to finish
+      - name: Wait for build & render stage summary
         id: result
         run: |
           set -euo pipefail
           BUILD_URL="${{ steps.find.outputs.url }}"
+          WFAPI_URL="${BUILD_URL%/}/wfapi/describe"
+          BUILD_NUM=$(printf '%s' "$BUILD_URL" | sed -E 's|.*/([0-9]+)/?$|\1|')
+          SHORT_SHA="${HEAD_SHA:0:7}"
+
+          # jq helpers shared by the live log + the final summary table.
+          read -r -d '' JQ_HELPERS <<'JQ' || true
+          def status_emoji:
+            if   . == "SUCCESS"             then "✅ SUCCESS"
+            elif . == "FAILED" or . == "FAILURE" then "❌ FAILED"
+            elif . == "UNSTABLE"            then "⚠️ UNSTABLE"
+            elif . == "ABORTED"             then "🛑 ABORTED"
+            elif . == "IN_PROGRESS"         then "⏳ RUNNING"
+            elif . == "NOT_EXECUTED"        then "⏭️ SKIPPED"
+            elif . == "PAUSED_PENDING_INPUT" then "⏸️ INPUT"
+            elif . == "QUEUED"              then "🕗 QUEUED"
+            else .
+            end;
+          def fmt_dur:
+            if . == null or . == 0 then "—"
+            else (./1000 | floor) as $s
+              | if $s < 60 then "\($s)s"
+                else "\(($s / 60 | floor))m \($s % 60)s"
+                end
+            end;
+          JQ
+
           RESULT=""
+          JSON=""
           for i in $(seq 1 180); do
-            JSON=$(curl -sS --fail -u "${JENKINS_USER}:${JENKINS_TOKEN}" "${BUILD_URL%/}/api/json" || true)
-            RESULT=$(echo "$JSON" | jq -r '.result // empty')
-            BUILDING=$(echo "$JSON" | jq -r '.building // true')
-            if [ -n "$RESULT" ] && [ "$BUILDING" != "true" ]; then
-              echo "Result: $RESULT"
-              echo "result=$RESULT" >> "$GITHUB_OUTPUT"
-              echo "build_url=$BUILD_URL" >> "$GITHUB_OUTPUT"
-              break
+            JSON=$(curl -sS -u "${JENKINS_USER}:${JENKINS_TOKEN}" "${WFAPI_URL}" || true)
+            if [ -z "$JSON" ] || ! echo "$JSON" | jq -e .status >/dev/null 2>&1; then
+              echo "Could not read wfapi yet (poll ${i}/180), retrying..."
+              sleep 10
+              continue
             fi
-            echo "Build in progress... (${i}/180)"
-            sleep 10
+
+            STATUS=$(echo "$JSON" | jq -r '.status')
+
+            echo "---- Jenkins #${BUILD_NUM} status: $STATUS (poll ${i}/180) ----"
+            echo "$JSON" | jq -r "${JQ_HELPERS}"' .stages[]? | "  • \(.name) — \(.status | status_emoji)  (\(.durationMillis | fmt_dur))"' || true
+
+            case "$STATUS" in
+              IN_PROGRESS|PAUSED_PENDING_INPUT|QUEUED|NOT_EXECUTED|"") sleep 10 ;;
+              *) RESULT="$STATUS"; break ;;
+            esac
           done
 
           if [ -z "$RESULT" ]; then
             echo "::error::Timed out waiting for Jenkins build to finish — $BUILD_URL"
-            exit 1
+            RESULT="TIMEOUT"
           fi
 
+          echo "result=$RESULT" >> "$GITHUB_OUTPUT"
+          echo "build_url=$BUILD_URL" >> "$GITHUB_OUTPUT"
+
+          # Render the live Jenkins stages into the GitHub Step Summary.
+          {
+            echo "### Jenkins build [#${BUILD_NUM}](${BUILD_URL}) — \`${JENKINS_JOB}/${JENKINS_BRANCH}\` @ \`${SHORT_SHA}\`"
+            echo ""
+            if [ -n "$JSON" ] && echo "$JSON" | jq -e .stages >/dev/null 2>&1; then
+              echo "| # | Stage | Status | Duration |"
+              echo "|---|-------|--------|----------|"
+              echo "$JSON" | jq -r "${JQ_HELPERS}"'
+                .stages
+                | to_entries[]
+                | "| \(.key + 1) | \(.value.name) | \(.value.status | status_emoji) | \(.value.durationMillis | fmt_dur) |"
+              '
+              echo ""
+              OVERALL=$(echo "$JSON" | jq -r "${JQ_HELPERS}"' .status | status_emoji')
+              echo "**Overall:** ${OVERALL}  ·  [Open in Jenkins →](${BUILD_URL})"
+            else
+              echo "_No stage data available from Jenkins wfapi._"
+              echo ""
+              echo "- Result: \`${RESULT}\`"
+              echo "- Build: ${BUILD_URL}"
+            fi
+          } > "$GITHUB_STEP_SUMMARY"
+
           case "$RESULT" in
-            SUCCESS)  echo "::notice::Jenkins build succeeded — $BUILD_URL"; exit 0 ;;
-            UNSTABLE) echo "::warning::Jenkins build was UNSTABLE — $BUILD_URL"; exit 1 ;;
-            FAILURE)  echo "::error::Jenkins build FAILED — $BUILD_URL"; exit 1 ;;
-            ABORTED)  echo "::error::Jenkins build was ABORTED — $BUILD_URL"; exit 1 ;;
-            *)        echo "::error::Unknown Jenkins result: $RESULT"; exit 1 ;;
+            SUCCESS)         echo "::notice::Jenkins build succeeded — $BUILD_URL"; exit 0 ;;
+            UNSTABLE)        echo "::warning::Jenkins build was UNSTABLE — $BUILD_URL"; exit 1 ;;
+            FAILED|FAILURE)  echo "::error::Jenkins build FAILED — $BUILD_URL"; exit 1 ;;
+            ABORTED)         echo "::error::Jenkins build was ABORTED — $BUILD_URL"; exit 1 ;;
+            TIMEOUT)         exit 1 ;;
+            *)               echo "::error::Unknown Jenkins result: $RESULT"; exit 1 ;;
           esac
 
-      - name: Summarize
-        if: always()
+      - name: Fallback summary (when build was never found)
+        if: always() && steps.result.outcome == 'skipped'
         run: |
           {
             echo "### Jenkins build"
             echo ""
             echo "- Job: \`${JENKINS_JOB}/${JENKINS_BRANCH}\`"
             echo "- Commit: \`${HEAD_SHA}\`"
-            echo "- Build URL: ${{ steps.result.outputs.build_url || steps.find.outputs.url || 'n/a' }}"
-            echo "- Result: ${{ steps.result.outputs.result || 'n/a' }}"
-          } >> "$GITHUB_STEP_SUMMARY"
+            echo "- Status: build never registered (check Jenkins webhook + scan log)"
+          } > "$GITHUB_STEP_SUMMARY"
