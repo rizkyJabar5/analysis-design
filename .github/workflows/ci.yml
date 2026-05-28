@@ -47,6 +47,45 @@ jobs:
             exit 1
           fi
 
+      - name: Fetch CSRF crumb
+        id: crumb
+        run: |
+          set -euo pipefail
+          CRUMB_JSON=$(curl -sS --fail -u "${JENKINS_USER}:${JENKINS_TOKEN}" \
+            "${JENKINS_URL%/}/crumbIssuer/api/json" || echo "")
+
+          if [ -n "$CRUMB_JSON" ] && echo "$CRUMB_JSON" | jq -e .crumb >/dev/null 2>&1; then
+            FIELD=$(echo "$CRUMB_JSON" | jq -r .crumbRequestField)
+            VALUE=$(echo "$CRUMB_JSON" | jq -r .crumb)
+            echo "header=${FIELD}: ${VALUE}" >> "$GITHUB_OUTPUT"
+            echo "Crumb acquired (${FIELD})"
+          else
+            echo "header=" >> "$GITHUB_OUTPUT"
+            echo "No CSRF crumb required."
+          fi
+
+      - name: Trigger multibranch scan
+        run: |
+          set -euo pipefail
+          ENC_PARENT=$(printf '%s' "${JENKINS_JOB}" | jq -sRr @uri)
+          SCAN_URL="${JENKINS_URL%/}/job/${ENC_PARENT}/build?delay=0sec"
+
+          ARGS=(-sS -o /dev/null -w "%{http_code}"
+                -u "${JENKINS_USER}:${JENKINS_TOKEN}"
+                -X POST)
+          if [ -n "${{ steps.crumb.outputs.header }}" ]; then
+            ARGS+=(-H "${{ steps.crumb.outputs.header }}")
+          fi
+
+          HTTP=$(curl "${ARGS[@]}" "$SCAN_URL")
+          echo "Scan trigger HTTP $HTTP for ${SCAN_URL}"
+          # 200/201/302 are all acceptable; anything else is suspect but not fatal
+          # because the webhook may have already queued a build.
+          case "$HTTP" in
+            200|201|302) echo "Scan requested." ;;
+            *) echo "::warning::Scan trigger returned HTTP $HTTP — relying on webhook." ;;
+          esac
+
       - name: Find Jenkins build for ${{ env.HEAD_SHA }}
         id: find
         run: |
