@@ -16,17 +16,25 @@ jobs:
     name: Trigger Jenkins Build
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # env:
-    #   JENKINS_URL: ${{ secrets.JENKINS_URL }}
-    #   JENKINS_USER: ${{ secrets.JENKINS_USER }}
-    #   JENKINS_TOKEN: ${{ secrets.JENKINS_TOKEN }}
-    #   JENKINS_JOB: ${{ github.event.inputs.jenkins_job || secrets.JENKINS_JOB }}
+    # Secrets are not available on PRs from forks — skip instead of failing.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+
+    env:
+      JENKINS_URL: ${{ secrets.JENKINS_URL }}
+      JENKINS_USER: ${{ secrets.JENKINS_USER }}
+      JENKINS_TOKEN: ${{ secrets.JENKINS_TOKEN }}
+      JENKINS_JOB: ${{ github.event.inputs.jenkins_job || secrets.JENKINS_JOB }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Validate Jenkins secrets
+        env:
+          JENKINS_URL: ${{ secrets.JENKINS_URL }}
+          JENKINS_USER: ${{ secrets.JENKINS_USER }}
+          JENKINS_TOKEN: ${{ secrets.JENKINS_TOKEN }}
+          JENKINS_JOB: ${{ github.event.inputs.jenkins_job || secrets.JENKINS_JOB }}
         run: |
           set -euo pipefail
           missing=0
@@ -36,7 +44,12 @@ jobs:
               missing=1
             fi
           done
-          [ "$missing" -eq 0 ] || exit 1
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::One or more Jenkins secrets are not configured."
+            echo "::error::Add them at: Settings → Secrets and variables → Actions → New repository secret"
+            echo "::error::Required names: JENKINS_URL, JENKINS_USER, JENKINS_TOKEN, JENKINS_JOB"
+            exit 1
+          fi
 
       - name: Fetch CSRF crumb
         id: crumb
