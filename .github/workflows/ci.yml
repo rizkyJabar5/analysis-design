@@ -125,8 +125,8 @@ jobs:
           ENC_PARENT=$(printf '%s' "${JENKINS_JOB}" | jq -sRr @uri)
           ENC_BRANCH=$(printf '%s' "${JENKINS_BRANCH}" | jq -sRr @uri)
           BRANCH_URL="${JENKINS_URL%/}/job/${ENC_PARENT}/job/${ENC_BRANCH}"
-          # Fetch more fields to debug SHA matching
-          TREE='builds[number,url,building,result,actions[lastBuiltRevision[SHA1,branch[name]]],timestamp]'
+          # URL-encode the tree parameter to avoid curl glob issues
+          TREE=$(printf 'builds[number,url,building,result,actions[lastBuiltRevision[SHA1,branch[name]]],timestamp]' | jq -sRr @uri)
 
           echo "Watching: $BRANCH_URL"
           echo "Looking for SHA: $HEAD_SHA"
@@ -134,7 +134,7 @@ jobs:
 
           # Jenkins receives the webhook asynchronously — give it time to scan the branch + enqueue.
           for i in $(seq 1 60); do
-            JSON=$(curl -sS -u "${JENKINS_USER}:${JENKINS_TOKEN}" \
+            JSON=$(curl -sS -g -u "${JENKINS_USER}:${JENKINS_TOKEN}" \
               "${BRANCH_URL}/api/json?tree=${TREE}" || echo "")
 
             if [ -n "$JSON" ] && echo "$JSON" | jq -e .builds >/dev/null 2>&1; then
