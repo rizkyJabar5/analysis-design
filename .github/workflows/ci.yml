@@ -126,46 +126,70 @@ jobs:
           ENC_BRANCH=$(printf '%s' "${JENKINS_BRANCH}" | jq -sRr @uri)
           BRANCH_URL="${JENKINS_URL%/}/job/${ENC_PARENT}/job/${ENC_BRANCH}"
           # URL-encode the tree parameter to avoid curl glob issues
-          TREE=$(printf 'builds[number,url,building,result,actions[lastBuiltRevision[SHA1,branch[name]]],timestamp]' | jq -sRr @uri)
+          TREE=$(printf 'builds[number,url,building,result,timestamp]' | jq -sRr @uri)
 
           echo "Watching: $BRANCH_URL"
           echo "Looking for SHA: $HEAD_SHA"
           echo "Branch: ${JENKINS_BRANCH}"
 
-          # Jenkins receives the webhook asynchronously — give it time to scan the branch + enqueue.
+          # Wait for a new build to appear (not the old ones we already know about)
+          KNOWN_BUILDS=""
           for i in $(seq 1 60); do
             JSON=$(curl -sS -g -u "${JENKINS_USER}:${JENKINS_TOKEN}" \
               "${BRANCH_URL}/api/json?tree=${TREE}" || echo "")
 
             if [ -n "$JSON" ] && echo "$JSON" | jq -e .builds >/dev/null 2>&1; then
-              # Try exact SHA match first
-              BUILD_URL=$(echo "$JSON" | jq -r --arg sha "$HEAD_SHA" '
-                .builds[]?
-                | select(any(.actions[]?; .lastBuiltRevision.SHA1 == $sha))
-                | .url' | head -n1)
-
-              # If no match, try the most recent build (webhook may have fired with different SHA)
-              if [ -z "$BUILD_URL" ]; then
-                BUILD_URL=$(echo "$JSON" | jq -r '.builds[0].url // empty')
-                if [ -n "$BUILD_URL" ]; then
-                  echo "::warning::SHA mismatch — using most recent build: $BUILD_URL"
-                  echo "Jenkins builds found:"
-                  echo "$JSON" | jq -r '.builds[]? | "  #\(.number) \(.result // "building") SHA=\(.actions[]?.lastBuiltRevision.SHA1 // "unknown")"' || true
-                fi
+              # Get list of build numbers
+              BUILD_NUMS=$(echo "$JSON" | jq -r '.builds[].number' 2>/dev/null | sort -n)
+              
+              # Check if there's a building build (in-progress)
+              BUILDING=$(echo "$JSON" | jq -r '.builds[]? | select(.building == true) | .number' 2>/dev/null)
+              
+              if [ -n "$BUILDING" ]; then
+                echo "Build #${BUILDING} is currently building... (${i}/60)"
+                sleep 10
+                continue
               fi
 
-              if [ -n "$BUILD_URL" ]; then
-                echo "Matched build: $BUILD_URL"
-                echo "url=$BUILD_URL" >> "$GITHUB_OUTPUT"
-                exit 0
+              # Get the most recent completed build
+              LATEST=$(echo "$JSON" | jq -r '.builds[0].number // empty')
+              LATEST_RESULT=$(echo "$JSON" | jq -r '.builds[0].result // empty')
+              
+              if [ -z "$LATEST" ]; then
+                echo "No builds found yet, waiting... (${i}/60)"
+                sleep 10
+                continue
               fi
+
+              # If we already checked this build number and it failed, wait for next
+              if [ "$KNOWN_BUILDS" = "$LATEST" ] && [ "$LATEST_RESULT" = "FAILURE" ]; then
+                echo "Build #${LATEST} already failed, waiting for new build... (${i}/60)"
+                sleep 10
+                continue
+              fi
+
+              echo "Latest build: #${LATEST} (${LATEST_RESULT})"
+              BUILD_URL=$(echo "$JSON" | jq -r '.builds[0].url')
+              
+              # If build is still running, wait
+              if [ "$LATEST_RESULT" = "null" ] || [ -z "$LATEST_RESULT" ]; then
+                echo "Build #${LATEST} still running, waiting... (${i}/60)"
+                KNOWN_BUILDS="$LATEST"
+                sleep 10
+                continue
+              fi
+
+              # Build completed - use it
+              echo "Using build: #${LATEST} (${LATEST_RESULT})"
+              echo "url=$BUILD_URL" >> "$GITHUB_OUTPUT"
+              exit 0
             fi
-            echo "Waiting for Jenkins to register a build for ${HEAD_SHA} on ${JENKINS_BRANCH}... (${i}/60)"
+            echo "Waiting for Jenkins... (${i}/60)"
             sleep 10
           done
 
-          echo "::error::No Jenkins build found for commit ${HEAD_SHA} on branch ${JENKINS_BRANCH} after 10 minutes."
-          echo "::error::Verify the multibranch job '${JENKINS_JOB}' has scanned and created '${JENKINS_BRANCH}', and the webhook is firing."
+          echo "::error::No Jenkins build found after 10 minutes."
+          echo "::error::Verify the multibranch job '${JENKINS_JOB}' has scanned and created '${JENKINS_BRANCH}'."
           exit 1
 
       - name: Wait for build & render stage summary
