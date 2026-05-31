@@ -55,24 +55,16 @@ pipeline {
                 script {
                     echo 'Looking for recently committed design files...'
 
+                    // Only get files from the last commit
                     def files = sh(
-                        script: "git diff-tree --no-commit-id --name-only -r HEAD | grep -E '\\.(xml|puml|uml|jpg|jpeg|png)\$' || true",
+                        script: "git diff-tree --no-commit-id --name-only -r HEAD | grep -E '\\.(xml|bpmn|puml|uml|jpg|jpeg|png)\$' || true",
                         returnStdout: true
                     ).trim()
-
-                    // Fallback for shallow clones / first builds where the diff is empty.
-                    if (files == "") {
-                        echo "Git diff did not detect any changes. Scanning all design files..."
-                        files = sh(
-                            script: "find . -type f \\( -name '*.xml' -o -name '*.puml' -o -name '*.uml' -o -name '*.jpg' -o -name '*.png' \\) | sed 's|^./||' || true",
-                            returnStdout: true
-                        ).trim()
-                    }
 
                     env.CHANGED_FILES = files
 
                     if (env.CHANGED_FILES == "") {
-                        echo "No design files found. Skipping analysis."
+                        echo "No design files found in last commit. Skipping analysis."
                     } else {
                         echo "Design files to analyze:\n${env.CHANGED_FILES}"
                     }
