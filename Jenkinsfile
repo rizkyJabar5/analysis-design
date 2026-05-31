@@ -176,15 +176,14 @@ pipeline {
 
                     // Add the same summary to the build description so it
                     // shows clickable on the build page (Jenkins linkifies URLs).
-                    def desc = new StringBuilder()
-                    desc << "STRIDE Analysis Results:\n"
+                    def desc = "STRIDE Analysis Results:"
                     for (r in results) {
-                        desc << "\n• ${r.file} — ${r.status} (score ${r.score}, ${r.threats} threats)"
+                        desc += "\n• ${r.file} — ${r.status} (score ${r.score}, ${r.threats} threats)"
                         if (r.link) {
-                            desc << "\n  Report: ${r.link}"
+                            desc += "\n  Report: ${r.link}"
                         }
                     }
-                    currentBuild.description = desc.toString()
+                    currentBuild.description = desc
 
                     if (pipelineFailed) {
                         error("Pipeline stopped: Quality Gate FAILED — vulnerabilities found in one or more design files.")
