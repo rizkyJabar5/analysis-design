@@ -4,7 +4,7 @@
     <bpmn:documentation>
       Secure User Transaction Process - STRIDE Valid Design
       All six STRIDE categories are mitigated:
- 
+
       S - Spoofing:
         - MFA + biometric + device attestation
         - [Task_AuditLog] HSM key storage, key rotation, unauthorized use monitoring
