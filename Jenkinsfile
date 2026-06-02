@@ -57,7 +57,7 @@ pipeline {
 
                     // Only get files from the last commit
                     def files = sh(
-                        script: "git diff-tree --no-commit-id --name-only -r HEAD | grep -E '\\.(xml|bpmn|puml|uml|jpg|jpeg|png)\$' || true",
+                        script: "git diff-tree --no-commit-id --name-only -r HEAD | grep -E '\\.(xml|bpmn|puml|uml|jpg|jpeg|png|svg)\$' || true",
                         returnStdout: true
                     ).trim()
 
