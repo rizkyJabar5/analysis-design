@@ -125,62 +125,56 @@ jobs:
           ENC_PARENT=$(printf '%s' "${JENKINS_JOB}" | jq -sRr @uri)
           ENC_BRANCH=$(printf '%s' "${JENKINS_BRANCH}" | jq -sRr @uri)
           BRANCH_URL="${JENKINS_URL%/}/job/${ENC_PARENT}/job/${ENC_BRANCH}"
-          # URL-encode the tree parameter to avoid curl glob issues
           TREE=$(printf 'builds[number,url,building,result,timestamp]' | jq -sRr @uri)
 
           echo "Watching: $BRANCH_URL"
           echo "Looking for SHA: $HEAD_SHA"
           echo "Branch: ${JENKINS_BRANCH}"
 
-          # Wait for a new build to appear (not the old ones we already know about)
-          KNOWN_BUILDS=""
+          # Snapshot of build numbers known before this workflow run.
+          KNOWN_BEFORE=""
           for i in $(seq 1 60); do
             JSON=$(curl -sS -g -u "${JENKINS_USER}:${JENKINS_TOKEN}" \
               "${BRANCH_URL}/api/json?tree=${TREE}" || echo "")
 
             if [ -n "$JSON" ] && echo "$JSON" | jq -e .builds >/dev/null 2>&1; then
-              # Get list of build numbers
-              BUILD_NUMS=$(echo "$JSON" | jq -r '.builds[].number' 2>/dev/null | sort -n)
-              
-              # Check if there's a building build (in-progress)
+              # Record known build numbers on first successful fetch.
+              if [ -z "$KNOWN_BEFORE" ]; then
+                KNOWN_BEFORE=$(echo "$JSON" | jq -r '.builds[].number' 2>/dev/null | sort -n | tr '\n' ' ')
+                echo "Known builds before this run: ${KNOWN_BEFORE:-<none>}"
+              fi
+
               BUILDING=$(echo "$JSON" | jq -r '.builds[]? | select(.building == true) | .number' 2>/dev/null)
-              
               if [ -n "$BUILDING" ]; then
                 echo "Build #${BUILDING} is currently building... (${i}/60)"
                 sleep 10
                 continue
               fi
 
-              # Get the most recent completed build
               LATEST=$(echo "$JSON" | jq -r '.builds[0].number // empty')
               LATEST_RESULT=$(echo "$JSON" | jq -r '.builds[0].result // empty')
-              
+
               if [ -z "$LATEST" ]; then
                 echo "No builds found yet, waiting... (${i}/60)"
                 sleep 10
                 continue
               fi
 
-              # If we already checked this build number and it failed, wait for next
-              if [ "$KNOWN_BUILDS" = "$LATEST" ] && [ "$LATEST_RESULT" = "FAILURE" ]; then
-                echo "Build #${LATEST} already failed, waiting for new build... (${i}/60)"
+              # Skip builds that already existed before this run.
+              if echo "$KNOWN_BEFORE" | grep -qw "$LATEST"; then
+                echo "Build #${LATEST} existed before this run, waiting for new build... (${i}/60)"
                 sleep 10
                 continue
               fi
 
-              echo "Latest build: #${LATEST} (${LATEST_RESULT})"
-              BUILD_URL=$(echo "$JSON" | jq -r '.builds[0].url')
-              
-              # If build is still running, wait
               if [ "$LATEST_RESULT" = "null" ] || [ -z "$LATEST_RESULT" ]; then
                 echo "Build #${LATEST} still running, waiting... (${i}/60)"
-                KNOWN_BUILDS="$LATEST"
                 sleep 10
                 continue
               fi
 
-              # Build completed - use it
-              echo "Using build: #${LATEST} (${LATEST_RESULT})"
+              BUILD_URL=$(echo "$JSON" | jq -r '.builds[0].url')
+              echo "Latest new build: #${LATEST} (${LATEST_RESULT})"
               echo "url=$BUILD_URL" >> "$GITHUB_OUTPUT"
               exit 0
             fi
@@ -200,6 +194,9 @@ jobs:
           WFAPI_URL="${BUILD_URL%/}/wfapi/describe"
           BUILD_NUM=$(printf '%s' "$BUILD_URL" | sed -E 's|.*/([0-9]+)/?$|\1|')
           SHORT_SHA="${HEAD_SHA:0:7}"
+
+          # Snapshot the current build number so we can detect newer ones.
+          CURRENT_NUM="$BUILD_NUM"
 
           # jq helpers shared by the live log + the final summary table.
           read -r -d '' JQ_HELPERS <<'JQ' || true
@@ -226,6 +223,27 @@ jobs:
           RESULT=""
           JSON=""
           for i in $(seq 1 180); do
+
+            # Every 5th poll (~50s), check for a newer build in the branch.
+            if [ $((i % 5)) -eq 1 ]; then
+              ENC_PARENT=$(printf '%s' "${JENKINS_JOB}" | jq -sRr @uri)
+              ENC_BRANCH=$(printf '%s' "${JENKINS_BRANCH}" | jq -sRr @uri)
+              BRANCH_URL="${JENKINS_URL%/}/job/${ENC_PARENT}/job/${ENC_BRANCH}"
+              TREE_LATEST=$(printf 'builds[number,result]' | jq -sRr @uri)
+              LATEST_JSON=$(curl -sS -g -u "${JENKINS_USER}:${JENKINS_TOKEN}" \
+                "${BRANCH_URL}/api/json?tree=${TREE_LATEST}" 2>/dev/null || echo "")
+              LATEST_NUM=$(echo "$LATEST_JSON" | jq -r '.builds[0].number // empty' 2>/dev/null)
+              if [ -n "$LATEST_NUM" ] && [ "$LATEST_NUM" != "$CURRENT_NUM" ]; then
+                LATEST_RES=$(echo "$LATEST_JSON" | jq -r '.builds[0].result // "IN_PROGRESS"')
+                LATEST_URL=$(echo "$LATEST_JSON" | jq -r '.builds[0].url // empty')
+                echo ">> Newer build detected: #${LATEST_NUM} (${LATEST_RES}) — switching from #${CURRENT_NUM}"
+                BUILD_URL="${LATEST_URL:-${BRANCH_URL}/${LATEST_NUM}/}"
+                WFAPI_URL="${BUILD_URL%/}/wfapi/describe"
+                BUILD_NUM="$LATEST_NUM"
+                CURRENT_NUM="$LATEST_NUM"
+              fi
+            fi
+
             JSON=$(curl -sS -u "${JENKINS_USER}:${JENKINS_TOKEN}" "${WFAPI_URL}" || true)
             if [ -z "$JSON" ] || ! echo "$JSON" | jq -e .status >/dev/null 2>&1; then
               echo "Could not read wfapi yet (poll ${i}/180), retrying..."

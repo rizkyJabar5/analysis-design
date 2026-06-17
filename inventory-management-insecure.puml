@@ -1,5 +1,5 @@
 @startuml InventoryManagementInsecure
-left to right direction
+left to right direction 
 skinparam packageStyle rectangle
 skinparam actorStyle awesome
 skinparam usecase {
