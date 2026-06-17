@@ -1,0 +1,367 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  id="Definitions_1"
+                  targetNamespace="http://bpmn.io/schema/bpmn">
+
+  <bpmn:collaboration id="Collaboration_1">
+    <bpmn:participant id="Participant_1" name="Secure Transaction Process" processRef="Process_1" />
+  </bpmn:collaboration>
+
+  <bpmn:process id="Process_1" isExecutable="true">
+
+    <bpmn:startEvent id="StartEvent_1" name="Begin Transaction">
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:task id="Task_TLS" name="TLS 1.3 + HSTS + Cert Pinning + Connection Limits + DDoS Mitigation">
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:task id="Task_UserLogin" name="User Login (Username + Password + MFA + Biometric)">
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:task id="Task_ValidateInput" name="Input Validation + Allowlist + Parameterized Query">
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:task id="Task_Authenticate" name="Authenticate (Verify Signature + Issuer + Audience + Expiry + Scope)">
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:exclusiveGateway id="Gateway_Auth" name="Internal mTLS Authenticated?">
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_6</bpmn:outgoing>
+      <bpmn:outgoing>Flow_NoAuth</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:endEvent id="EndEvent_Reject" name="Generic Error (No Details) + Redacted Audit Log">
+      <bpmn:incoming>Flow_NoAuth</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:task id="Task_Authz" name="RBAC + OPA Policy-as-Code + Scope Check + Version Control + Automated Testing">
+      <bpmn:incoming>Flow_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_7</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:task id="Task_ValidateJWT" name="Validate JWT (RS256 Signed, HSM Key, Short Expiry, Scope Bound, Key Rotation)">
+      <bpmn:incoming>Flow_7</bpmn:incoming>
+      <bpmn:outgoing>Flow_8</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:exclusiveGateway id="Gateway_JWT" name="JWT Valid?">
+      <bpmn:incoming>Flow_8</bpmn:incoming>
+      <bpmn:outgoing>Flow_9</bpmn:outgoing>
+      <bpmn:outgoing>Flow_InvalidJWT</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:endEvent id="EndEvent_InvalidJWT" name="Generic 401 Error (No Details) + Internal Audit Log">
+      <bpmn:incoming>Flow_InvalidJWT</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:task id="Task_IssueJWT" name="Issue JWT (RS256 Signed, HSM Key, Short Expiry, Scope Bound, Key Rotation)">
+      <bpmn:incoming>Flow_9</bpmn:incoming>
+      <bpmn:outgoing>Flow_10</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:task id="Task_TransactDB" name="Execute Transaction (Parameterized Query + TDE + KMS + Constraints + Rate Limit)">
+      <bpmn:incoming>Flow_10</bpmn:incoming>
+      <bpmn:outgoing>Flow_11</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:task id="Task_AuditLog" name="Sign &amp; Append Audit Log (WORM, Immutable, HSM Key, Key Rotation)">
+      <bpmn:incoming>Flow_11</bpmn:incoming>
+      <bpmn:outgoing>Flow_12</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:task id="Task_RedactedLog" name="Centralized Logging with PII Redaction (AES-GCM Authenticated Encryption)">
+      <bpmn:incoming>Flow_12</bpmn:incoming>
+      <bpmn:outgoing>Flow_13</bpmn:outgoing>
+    </bpmn:task>
+
+    <bpmn:endEvent id="EndEvent_Success" name="Transaction Success + Masked Receipt (Session-Bound)">
+      <bpmn:incoming>Flow_13</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="StartEvent_1" targetRef="Task_TLS" />
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Task_TLS" targetRef="Task_UserLogin" name="mTLS" />
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Task_UserLogin" targetRef="Task_ValidateInput" name="TLS/JWE" />
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Task_ValidateInput" targetRef="Task_Authenticate" name="TLS/AES-GCM" />
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="Task_Authenticate" targetRef="Gateway_Auth" />
+    <bpmn:sequenceFlow id="Flow_6" name="Yes + mTLS" sourceRef="Gateway_Auth" targetRef="Task_Authz">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">${authenticated == true}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_NoAuth" name="No" sourceRef="Gateway_Auth" targetRef="EndEvent_Reject">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">${authenticated == false}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_7" sourceRef="Task_Authz" targetRef="Task_ValidateJWT" name="Internal mTLS" />
+    <bpmn:sequenceFlow id="Flow_8" sourceRef="Task_ValidateJWT" targetRef="Gateway_JWT" />
+    <bpmn:sequenceFlow id="Flow_9" name="Yes + mTLS" sourceRef="Gateway_JWT" targetRef="Task_IssueJWT">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">${jwtValid == true}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_InvalidJWT" name="No" sourceRef="Gateway_JWT" targetRef="EndEvent_InvalidJWT">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">${jwtValid == false}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_10" sourceRef="Task_IssueJWT" targetRef="Task_TransactDB" name="Internal TLS/JWE" />
+    <bpmn:sequenceFlow id="Flow_11" sourceRef="Task_TransactDB" targetRef="Task_AuditLog" name="mTLS" />
+    <bpmn:sequenceFlow id="Flow_12" sourceRef="Task_AuditLog" targetRef="Task_RedactedLog" name="mTLS" />
+    <bpmn:sequenceFlow id="Flow_13" sourceRef="Task_RedactedLog" targetRef="EndEvent_Success" />
+
+    <bpmn:dataStoreReference id="DataStore_TxDB" name="Transactions DB (TDE + KMS + RBAC + Audit Triggers)" />
+    <bpmn:dataStoreReference id="DataStore_AuditLog" name="Immutable Audit Log (WORM + HSM Signed + TDE/KMS Encrypted)" />
+    <bpmn:dataStoreReference id="DataStore_Logs" name="Centralized Logs (Redacted + AES-GCM Authenticated Encryption)" />
+
+    <bpmn:dataOutputAssociation id="DOA_TxDB" sourceRef="Task_TransactDB" targetRef="DataStore_TxDB" />
+    <bpmn:dataOutputAssociation id="DOA_Audit" sourceRef="Task_AuditLog" targetRef="DataStore_AuditLog" />
+    <bpmn:dataOutputAssociation id="DOA_Logs" sourceRef="Task_RedactedLog" targetRef="DataStore_Logs" />
+
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Collaboration_1">
+
+      <bpmndi:BPMNShape id="Participant_1_di" bpmnElement="Participant_1" isHorizontal="true">
+        <dc:Bounds x="124" y="155" width="2102" height="397" />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="StartEvent_1_di" bpmnElement="StartEvent_1">
+        <dc:Bounds x="170" y="200" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="129" y="243" width="118" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Task_TLS_di" bpmnElement="Task_TLS">
+        <dc:Bounds x="260" y="178" width="120" height="80" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Task_UserLogin_di" bpmnElement="Task_UserLogin">
+        <dc:Bounds x="440" y="178" width="120" height="80" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Task_ValidateInput_di" bpmnElement="Task_ValidateInput">
+        <dc:Bounds x="620" y="178" width="120" height="80" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Task_Authenticate_di" bpmnElement="Task_Authenticate">
+        <dc:Bounds x="800" y="178" width="120" height="80" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Gateway_Auth_di" bpmnElement="Gateway_Auth" isMarkerVisible="true">
+        <dc:Bounds x="985" y="195" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="971" y="252" width="78" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="EndEvent_Reject_di" bpmnElement="EndEvent_Reject">
+        <dc:Bounds x="1003" y="332" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="960" y="375" width="122" height="41" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Task_Authz_di" bpmnElement="Task_Authz">
+        <dc:Bounds x="1100" y="178" width="120" height="80" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Task_ValidateJWT_di" bpmnElement="Task_ValidateJWT">
+        <dc:Bounds x="1280" y="178" width="120" height="80" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Gateway_JWT_di" bpmnElement="Gateway_JWT" isMarkerVisible="true">
+        <dc:Bounds x="1465" y="195" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1464" y="252" width="52" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="EndEvent_InvalidJWT_di" bpmnElement="EndEvent_InvalidJWT">
+        <dc:Bounds x="1472" y="332" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1421" y="375" width="138" height="41" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Task_IssueJWT_di" bpmnElement="Task_IssueJWT">
+        <dc:Bounds x="1580" y="178" width="120" height="80" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Task_TransactDB_di" bpmnElement="Task_TransactDB">
+        <dc:Bounds x="1760" y="178" width="120" height="80" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Task_AuditLog_di" bpmnElement="Task_AuditLog">
+        <dc:Bounds x="1940" y="178" width="120" height="80" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Task_RedactedLog_di" bpmnElement="Task_RedactedLog">
+        <dc:Bounds x="2120" y="178" width="120" height="80" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="EndEvent_Success_di" bpmnElement="EndEvent_Success">
+        <dc:Bounds x="2300" y="200" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2262" y="243" width="112" height="41" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="DataStore_TxDB_di" bpmnElement="DataStore_TxDB" isExpanded="true">
+        <dc:Bounds x="1780" y="298" width="80" height="58" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="DataStore_AuditLog_di" bpmnElement="DataStore_AuditLog" isExpanded="true">
+        <dc:Bounds x="1960" y="298" width="80" height="58" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="DataStore_Logs_di" bpmnElement="DataStore_Logs" isExpanded="true">
+        <dc:Bounds x="2140" y="298" width="80" height="58" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+        <di:waypoint x="206" y="218" />
+        <di:waypoint x="260" y="218" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+        <di:waypoint x="380" y="218" />
+        <di:waypoint x="440" y="218" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="400" y="200" width="23" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3">
+        <di:waypoint x="560" y="218" />
+        <di:waypoint x="620" y="218" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="580" y="200" width="38" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Flow_4_di" bpmnElement="Flow_4">
+        <di:waypoint x="740" y="218" />
+        <di:waypoint x="800" y="218" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="760" y="200" width="54" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Flow_5_di" bpmnElement="Flow_5">
+        <di:waypoint x="920" y="218" />
+        <di:waypoint x="985" y="220" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Flow_6_di" bpmnElement="Flow_6">
+        <di:waypoint x="1035" y="220" />
+        <di:waypoint x="1100" y="218" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1058" y="200" width="47" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Flow_NoAuth_di" bpmnElement="Flow_NoAuth">
+        <di:waypoint x="1010" y="245" />
+        <di:waypoint x="1010" y="332" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1016" y="282" width="18" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Flow_7_di" bpmnElement="Flow_7">
+        <di:waypoint x="1220" y="218" />
+        <di:waypoint x="1280" y="218" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1240" y="200" width="50" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Flow_8_di" bpmnElement="Flow_8">
+        <di:waypoint x="1400" y="218" />
+        <di:waypoint x="1465" y="220" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Flow_9_di" bpmnElement="Flow_9">
+        <di:waypoint x="1515" y="220" />
+        <di:waypoint x="1580" y="218" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1538" y="200" width="47" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Flow_InvalidJWT_di" bpmnElement="Flow_InvalidJWT">
+        <di:waypoint x="1490" y="245" />
+        <di:waypoint x="1490" y="332" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1496" y="282" width="18" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Flow_10_di" bpmnElement="Flow_10">
+        <di:waypoint x="1700" y="218" />
+        <di:waypoint x="1760" y="218" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1720" y="200" width="54" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Flow_11_di" bpmnElement="Flow_11">
+        <di:waypoint x="1880" y="218" />
+        <di:waypoint x="1940" y="218" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1900" y="200" width="23" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Flow_12_di" bpmnElement="Flow_12">
+        <di:waypoint x="2060" y="218" />
+        <di:waypoint x="2120" y="218" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2080" y="200" width="23" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Flow_13_di" bpmnElement="Flow_13">
+        <di:waypoint x="2240" y="218" />
+        <di:waypoint x="2300" y="218" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="DOA_TxDB_di" bpmnElement="DOA_TxDB">
+        <di:waypoint x="1820" y="258" />
+        <di:waypoint x="1820" y="298" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="DOA_Audit_di" bpmnElement="DOA_Audit">
+        <di:waypoint x="2000" y="258" />
+        <di:waypoint x="2000" y="298" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="DOA_Logs_di" bpmnElement="DOA_Logs">
+        <di:waypoint x="2180" y="258" />
+        <di:waypoint x="2180" y="298" />
+      </bpmndi:BPMNEdge>
+
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+</bpmn:definitions>
